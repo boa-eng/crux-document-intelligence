@@ -31,7 +31,7 @@ export function Hero() {
         id="spline-3d"
         ref={sceneRef}
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        className="pointer-events-none absolute inset-0 flex items-start justify-center pt-[8vh]"
         style={{
           transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
           transition: 'transform 0.3s ease-out',
@@ -43,7 +43,7 @@ export function Hero() {
           Scene concept: translucent floating document sheets orbiting a
           glowing blue crystalline core, slow rotation, soft refraction.
         */}
-        <div className="crux-crystal opacity-70">
+        <div className="crux-crystal opacity-50">
           <div
             className="crux-sheet"
             style={{ transform: 'translateZ(70px) rotate(-8deg)' }}
@@ -64,6 +64,16 @@ export function Hero() {
           <div className="crux-crystal__core" />
         </div>
       </div>
+
+      {/* Legibility scrim behind text */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[5]"
+        style={{
+          background:
+            'radial-gradient(ellipse 50% 45% at 50% 55%, rgba(7,11,18,0.85), transparent 75%)',
+        }}
+      />
 
       {/* Content */}
       <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center">

@@ -1,6 +1,5 @@
 @import 'tailwindcss';
 
-/* crux-theme-marker-v1 */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
