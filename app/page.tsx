@@ -1,4 +1,5 @@
 import { AnimatedBackground } from '@/components/crux/animated-background'
+import { StickyBar } from '@/components/crux/sticky-bar'
 import { Hero } from '@/components/crux/hero'
 import { Tool } from '@/components/crux/tool'
 import { Tension } from '@/components/crux/tension'
@@ -15,6 +16,7 @@ export default function Page() {
   return (
     <>
       <AnimatedBackground />
+      <StickyBar />
       <main className="relative">
         <Hero />
         <Tool />

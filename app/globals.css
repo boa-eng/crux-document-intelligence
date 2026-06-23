@@ -4,7 +4,7 @@
 
 @theme inline {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-heading: var(--font-syne), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-fraunces), ui-serif, Georgia, serif;
   --font-mono: var(--font-jetbrains), ui-monospace, monospace;
 
   --color-background: var(--background);
@@ -33,20 +33,20 @@
 }
 
 :root {
-  color-scheme: dark;
-  --background: #070b12;
-  --foreground: #e4ecff;
-  --surface: #0d1421;
-  --card: #141b2d;
-  --card-foreground: #e4ecff;
-  --border: #1a2535;
-  --accent: #3b7eff;
-  --accent-glow: #5b9bff;
-  --accent-foreground: #ffffff;
-  --muted: #0d1421;
-  --muted-foreground: #5a7090;
-  --teal: #2dd4a7;
-  --warn: #f87171;
+  color-scheme: light;
+  --background: #F7F3EE;
+  --foreground: #1C1917;
+  --surface: #EFE9E1;
+  --card: #FCFAF7;
+  --card-foreground: #1C1917;
+  --border: #E4DAD0;
+  --accent: #7A2E48;
+  --accent-glow: #7A2E48;
+  --accent-foreground: #FCF9F7;
+  --muted: #EFE9E1;
+  --muted-foreground: #6B635C;
+  --teal: #3F7A6B;
+  --warn: #B23A2E;
   --whatsapp: #25d366;
 }
 
@@ -97,49 +97,46 @@
 }
 
 .crux-bg__glow--a {
-  width: 60vw;
-  height: 60vw;
-  top: -15%;
-  left: -10%;
+  width: 70vw;
+  height: 70vw;
+  top: -25%;
+  left: -15%;
   background: radial-gradient(
     circle,
-    rgba(59, 126, 255, 0.22),
+    rgba(122, 46, 72, 0.09),
     transparent 70%
   );
   animation: drift-a 75s ease-in-out infinite, breathe-glow 14s ease-in-out infinite;
 }
 
 .crux-bg__glow--b {
-  width: 55vw;
-  height: 55vw;
-  bottom: -20%;
-  right: -10%;
+  width: 65vw;
+  height: 65vw;
+  bottom: -30%;
+  right: -15%;
   background: radial-gradient(
     circle,
-    rgba(45, 110, 220, 0.18),
+    rgba(176, 120, 145, 0.08),
     transparent 70%
   );
   animation: drift-b 90s ease-in-out infinite, breathe-glow 18s ease-in-out infinite;
 }
 
+/* Faint warm dot grid — barely-there texture, fades toward edges */
 .crux-bg__grid {
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(rgba(228, 236, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(228, 236, 255, 0.04) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black, transparent 80%);
-  opacity: 0.6;
+  background-image:
+    radial-gradient(circle, rgba(26, 26, 24, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+  background-position: 0 0;
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000, transparent 85%);
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000, transparent 85%);
+  opacity: 0.7;
 }
 
 .crux-particle {
-  position: absolute;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: rgba(91, 155, 255, 0.5);
-  box-shadow: 0 0 6px 1px rgba(91, 155, 255, 0.4);
-  will-change: transform;
+  display: none;
 }
 
 @keyframes drift-a {
@@ -170,39 +167,74 @@
    THINKING ORB — Claude-style breathing blob
    ============================================ */
 .thinking-orb {
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, #3b7eff, #2dd4a7);
-  animation: orb-breathe 1.5s ease-in-out infinite;
+  width: 26px;
+  height: 26px;
+  background: radial-gradient(circle at 35% 30%, #B05A78, #7A2E48 70%);
+  border-radius: 50%;
+  filter: blur(0.3px);
+  animation: orb-breathe 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 @keyframes orb-breathe {
-  0%, 100% {
-    transform: scale(1);
-    border-radius: 50%;
-    box-shadow: 0 0 20px 8px rgba(59, 126, 255, 0.3);
+  0% {
+    transform: scale(0.92);
+    border-radius: 50% 50% 50% 50%;
+    opacity: 0.7;
   }
-  50% {
-    transform: scale(1.08);
-    border-radius: 45% 55% 50% 45%;
-    box-shadow: 0 0 30px 12px rgba(59, 126, 255, 0.4);
+  35% {
+    transform: scale(1.06);
+    border-radius: 56% 44% 47% 53% / 53% 51% 49% 47%;
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.98);
+    border-radius: 46% 54% 55% 45% / 48% 46% 54% 52%;
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(0.92);
+    border-radius: 50%;
+    opacity: 0.7;
   }
 }
 
 /* ============================================
    STREAMING CURSOR
    ============================================ */
-.stream-cursor::after {
-  content: '|';
-  display: inline-block;
-  margin-left: 1px;
-  color: var(--accent);
-  animation: cursor-blink 0.6s steps(1) infinite;
-}
-
 @keyframes cursor-blink {
   0%, 50% { opacity: 1; }
   50.01%, 100% { opacity: 0; }
+}
+
+/* blinking caret appended after live-rendered Markdown while streaming */
+.stream-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: cursor-blink 0.6s steps(1) infinite;
+}
+
+/* ============================================
+   SHIMMER SKELETON — warm plum-tinted loading sweep
+   ============================================ */
+.skeleton-line {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 5%, var(--surface)) 25%,
+    color-mix(in srgb, var(--accent) 13%, var(--card)) 50%,
+    color-mix(in srgb, var(--accent) 5%, var(--surface)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ============================================
@@ -219,14 +251,14 @@
 .crux-crystal__face {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(91, 155, 255, 0.35);
+  border: 1px solid rgba(196, 91, 60, 0.20);
   border-radius: 24px;
   background: linear-gradient(
     135deg,
-    rgba(59, 126, 255, 0.08),
-    rgba(45, 212, 167, 0.04)
+    rgba(196, 91, 60, 0.05),
+    rgba(214, 160, 110, 0.03)
   );
-  box-shadow: inset 0 0 40px rgba(59, 126, 255, 0.15);
+  box-shadow: inset 0 0 40px rgba(196, 91, 60, 0.08);
   backdrop-filter: blur(2px);
 }
 
@@ -238,8 +270,8 @@
   height: 90px;
   margin: -45px 0 0 -45px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #5b9bff, #3b7eff 60%, #1a3a8a);
-  box-shadow: 0 0 60px 20px rgba(59, 126, 255, 0.4);
+  background: radial-gradient(circle at 35% 35%, #E5A982, #C45B3C 60%, #8A3D27);
+  box-shadow: 0 0 60px 20px rgba(196, 91, 60, 0.22);
   animation: core-pulse 6s ease-in-out infinite;
 }
 
@@ -249,8 +281,8 @@
 }
 
 @keyframes core-pulse {
-  0%, 100% { box-shadow: 0 0 60px 20px rgba(59, 126, 255, 0.35); }
-  50% { box-shadow: 0 0 80px 28px rgba(59, 126, 255, 0.5); }
+  0%, 100% { box-shadow: 0 0 60px 20px rgba(196, 91, 60, 0.18); }
+  50% { box-shadow: 0 0 80px 28px rgba(196, 91, 60, 0.30); }
 }
 
 /* Floating sheets around the core (fallback) */
@@ -261,10 +293,10 @@
   width: 120px;
   height: 150px;
   margin: -75px 0 0 -60px;
-  border: 1px solid rgba(91, 155, 255, 0.25);
+  border: 1px solid rgba(196, 91, 60, 0.18);
   border-radius: 8px;
-  background: linear-gradient(160deg, rgba(20, 27, 45, 0.7), rgba(13, 20, 33, 0.5));
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(160deg, rgba(251, 250, 246, 0.7), rgba(239, 235, 226, 0.5));
+  box-shadow: 0 8px 40px rgba(120, 80, 60, 0.12);
 }
 
 /* ============================================
@@ -344,9 +376,37 @@
 }
 
 .glass {
-  background: rgba(20, 27, 45, 0.55);
+  background: rgba(251, 250, 246, 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* ============================================
+   CORNER BRACKETS — electric green, 20px arms
+   ============================================ */
+.bracket-card {
+  position: relative;
+}
+.bracket-card::before,
+.bracket-card::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: rgba(122, 46, 72, 0.55);
+  border-style: solid;
+  pointer-events: none;
+  z-index: 1;
+}
+.bracket-card::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+.bracket-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
 }
 
 /* ============================================

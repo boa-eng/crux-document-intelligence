@@ -6,7 +6,7 @@ const STEPS = [
   {
     n: '01',
     title: 'UPLOAD',
-    body: 'Drop in any document — contract, handbook, policy, report. Crux reads every word.',
+    body: 'Drop in any document. Contract, handbook, policy, report. Crux reads every word.',
     dir: 'left' as const,
   },
   {

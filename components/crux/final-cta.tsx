@@ -26,7 +26,7 @@ export function FinalCta() {
 
   const openWhatsApp = () => {
     const text = encodeURIComponent(
-      `Hi Crux — I'm ${form.name || 'interested'} from ${form.company || 'a team'}. ${form.message || 'I\u2019d love to see Crux on our documents.'}`,
+      `Hi Crux, I'm ${form.name || 'interested'} from ${form.company || 'a team'}. ${form.message || 'I\u2019d love to see Crux on our documents.'}`,
     )
     // TODO: replace with the real WhatsApp business number
     window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer')

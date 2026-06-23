@@ -3,9 +3,9 @@
 import { useReveal } from './use-reveal'
 
 const VALUES = [
-  'Answers in seconds, not afternoons.',
-  'Every answer shows its source. No hallucinations.',
-  'Documents deleted the moment you close this tab.',
+  'Answers in seconds, not hours.',
+  'Every answer, traced to its source.',
+  'Your documents vanish the moment you leave.',
 ]
 
 export function WhyCrux() {

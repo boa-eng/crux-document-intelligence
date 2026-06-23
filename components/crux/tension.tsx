@@ -3,9 +3,9 @@
 import { useReveal } from './use-reveal'
 
 const LINES = [
-  'A 200-PAGE CONTRACT.',
-  "A POLICY YOU CAN'T SEARCH.",
-  'A QUESTION NO ONE CAN ANSWER FAST ENOUGH.',
+  'The answer is in there.',
+  'Buried in there, somewhere.',
+  'You don’t have time to look.',
 ]
 
 export function Tension() {
@@ -14,7 +14,7 @@ export function Tension() {
   return (
     <section className="px-6 py-28 md:py-40">
       <div ref={ref} className="mx-auto max-w-4xl text-center">
-        <h2 className="font-heading text-3xl font-extrabold leading-[1.15] tracking-tight text-balance md:text-5xl">
+        <h2 className="font-heading font-extrabold leading-[1.15] tracking-tight text-balance" style={{ fontSize: 'clamp(36px, 5vw, 56px)' }}>
           {LINES.map((line, i) => (
             <span
               key={i}
@@ -36,7 +36,7 @@ export function Tension() {
             transitionDelay: `${LINES.length * 200}ms`,
           }}
         >
-          Crux is what serious teams use when the answer has to be right.
+          So Crux reads it for you. And shows you exactly where.
         </p>
       </div>
     </section>

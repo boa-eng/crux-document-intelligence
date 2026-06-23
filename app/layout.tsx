@@ -1,12 +1,12 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Syne, Inter, JetBrains_Mono } from 'next/font/google'
+import { Fraunces, Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 
-const syne = Syne({
-  variable: '--font-syne',
+const fraunces = Fraunces({
+  variable: '--font-fraunces',
   subsets: ['latin'],
-  weight: ['700', '800'],
+  weight: ['500', '600', '700'],
 })
 
 const inter = Inter({
@@ -22,15 +22,15 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Crux — The answer is in there. Crux finds it.',
+  title: 'Crux. The answer is in there. Crux finds it.',
   description:
-    'Ask your documents anything. Get the answer — with the exact source to verify it. Processed in memory, deleted on close. Built for teams who can\u2019t afford wrong answers.',
+    'Ask your documents anything. Get the answer. See exactly where it came from. Processed in memory, deleted on close. Built for teams who can\u2019t afford wrong answers.',
   generator: 'v0.app',
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#070B12',
+  colorScheme: 'light',
+  themeColor: '#F5F3EE',
   userScalable: true,
 }
 
@@ -42,7 +42,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${syne.variable} ${inter.variable} ${jetbrainsMono.variable} bg-background`}
+      className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} bg-background`}
     >
       <body className="font-sans antialiased">
         {children}
