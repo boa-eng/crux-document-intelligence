@@ -97,29 +97,11 @@
 }
 
 .crux-bg__glow--a {
-  width: 70vw;
-  height: 70vw;
-  top: -25%;
-  left: -15%;
-  background: radial-gradient(
-    circle,
-    rgba(122, 46, 72, 0.09),
-    transparent 70%
-  );
-  animation: drift-a 75s ease-in-out infinite, breathe-glow 14s ease-in-out infinite;
+  display: none;
 }
 
 .crux-bg__glow--b {
-  width: 65vw;
-  height: 65vw;
-  bottom: -30%;
-  right: -15%;
-  background: radial-gradient(
-    circle,
-    rgba(176, 120, 145, 0.08),
-    transparent 70%
-  );
-  animation: drift-b 90s ease-in-out infinite, breathe-glow 18s ease-in-out infinite;
+  display: none;
 }
 
 /* Faint warm dot grid — barely-there texture, fades toward edges */

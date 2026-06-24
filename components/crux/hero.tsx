@@ -11,29 +11,26 @@ export function Hero() {
       className="relative flex min-h-[100svh] flex-col items-center justify-center px-6 py-24 text-center"
     >
       {/* Content */}
-      <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center">
+      <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center">
         <p
-          className="fade-up font-mono text-sm font-semibold uppercase tracking-[0.2em] text-accent md:text-base"
+          className="fade-up font-mono text-sm font-semibold uppercase tracking-[0.2em] text-accent"
           style={{ animationDelay: '0ms' }}
         >
-          The answer is in there.
+          Crux
         </p>
 
         <h1
-          className="fade-up mt-6 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
+          className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-8xl lg:text-9xl"
           style={{ animationDelay: '50ms' }}
         >
-          Crux finds it
-          <br />
-          in seconds.
+          Ask your documents anything.
         </h1>
 
         <p
-          className="fade-up mt-6 max-w-xl text-lg font-medium leading-relaxed text-muted-foreground md:text-xl"
+          className="fade-up mt-6 text-lg font-medium text-muted-foreground md:text-xl"
           style={{ animationDelay: '100ms' }}
         >
-          Ask your documents anything. Get the answer. See exactly where it
-          came from.
+          Cited sources. Every answer.
         </p>
 
         <div
@@ -49,19 +46,13 @@ export function Hero() {
               →
             </span>
           </button>
-          <button
-            onClick={scrollToTool}
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-7 py-3.5 text-sm font-semibold text-foreground transition-all duration-200 hover:border-accent/50"
-          >
-            See how it works ↓
-          </button>
         </div>
 
         <p
           className="fade-up mt-8 max-w-md text-sm leading-relaxed text-muted-foreground"
           style={{ animationDelay: '200ms' }}
         >
-          No sign-up. Nothing saved. Your documents leave when you do.
+          No account. Nothing stored. Your files leave when you do.
         </p>
       </div>
 
