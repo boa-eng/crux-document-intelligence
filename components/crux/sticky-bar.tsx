@@ -21,9 +21,6 @@ export function StickyBar() {
     return () => observer.disconnect()
   }, [])
 
-  const toTool = () =>
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-
   return (
     <div
       className={`glass fixed inset-x-0 top-0 z-50 border-b border-border transition-all duration-300 ${
@@ -36,15 +33,6 @@ export function StickyBar() {
         <span className="font-heading text-lg font-semibold tracking-tight text-foreground">
           Crux
         </span>
-        <button
-          onClick={toTool}
-          className="group inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition hover:scale-[1.03]"
-        >
-          Try it now
-          <span className="transition-transform duration-200 group-hover:translate-x-0.5">
-            →
-          </span>
-        </button>
       </div>
     </div>
   )

@@ -49,7 +49,6 @@ export function Demos() {
     active === 'All' ? DEMOS : DEMOS.filter((d) => d.industry === active)
 
   const loadDemo = (industry: string) => {
-    // TODO: GET /demo/{industry} -> { session_id, demo_loaded: true }
     document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
   }
 

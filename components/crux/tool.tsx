@@ -3,12 +3,22 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { ThinkingSkeleton } from './thinking-skeleton'
 
 const MAX_MESSAGES = 15
 const MAX_FILES = 10
 const ACCEPTED = '.pdf,.docx,.txt,.xlsx'
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+// Typewriter reveal pacing (chars per animation frame, ~60fps). Eases in:
+// starts slow, multiplies by DRIP_RAMP each frame up to DRIP_MAX_SPEED. Lower
+// DRIP_START_SPEED / DRIP_MAX_SPEED for an overall slower, calmer stream.
+const DRIP_START_SPEED = 1.2 // ~72 chars/sec at the very start — deliberately slow
+const DRIP_RAMP = 1.06 // acceleration per frame
+const DRIP_MAX_SPEED = 40 // ceiling, ~2400 chars/sec when fully ramped
 
 type Citation = { label: string; snippet?: string }
 
@@ -46,15 +56,54 @@ type Message = {
 
 let idSeq = 1
 
-/** Greeting chosen from the visitor's local hour. Refreshes on page load only. */
-function greetingForHour(h: number): string {
-  if (h >= 5 && h < 8) return 'Up before sunrise. Your documents have been waiting.'
-  if (h >= 8 && h < 12) return 'Morning. The answer is already in there.'
-  if (h >= 12 && h < 14) return 'Lunch break. Best five minutes you’ll spend today.'
-  if (h >= 14 && h < 17) return 'Deep in the afternoon. Let Crux do the digging.'
-  if (h >= 17 && h < 20) return 'Still going. One more answer before you close up.'
-  if (h >= 20 && h < 23) return 'Working late. The documents don’t mind.'
-  return 'Past midnight. Either this is urgent or you’re very thorough. Either way, let’s find it.'
+/** Taglines rotate by day-of-month so they change daily without being random
+ *  on every load. Document-work focused, Apple-level concise. */
+const TAGLINES = [
+  'The answer is already in there.',
+  'Ask anything. Crux finds it.',
+  'Every claim, backed by the source.',
+  'Find the exact line, not a paraphrase.',
+  'Cited sources. Every answer.',
+  'Your documents are waiting.',
+  'Precision retrieval. Plain language.',
+]
+
+/** Build a Claude-style greeting: day/time-aware headline + rotating tagline.
+ *  Mirrors the full Claude.ai greeting set — day-of-week variants, Friday specials,
+ *  weekend reads, late-night and early-morning catches. Name updates the headline
+ *  live once the user submits the name form. */
+function buildGreeting(
+  name: string,
+  nameDone: boolean,
+): { headline: string; tagline: string } {
+  const now = new Date()
+  const h = now.getHours()
+  const dow = now.getDay() // 0 Sun → 6 Sat
+  const dom = now.getDate() // 1-31, seeds daily rotation
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const day = days[dow]
+  const n = nameDone && name ? `, ${name}.` : '.'
+
+  let headline: string
+  if (h >= 22 || h < 5) {
+    headline = nameDone && name ? `Night owl, ${name}.` : 'Still at it.'
+  } else if (h < 8) {
+    headline = nameDone && name ? `Up early, ${name}.` : 'Up early.'
+  } else if (dow === 5) {
+    // Friday: alternate variant by day-of-month parity
+    const v = dom % 2 === 0 ? 'Happy Friday' : 'That Friday feeling'
+    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
+  } else if (dow === 6) {
+    const v = dom % 2 === 0 ? 'Happy Saturday' : 'Weekend work'
+    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
+  } else if (dow === 0) {
+    const v = dom % 2 === 0 ? 'Happy Sunday' : 'Sunday reading'
+    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
+  } else {
+    headline = `Happy ${day}${n}`
+  }
+
+  return { headline, tagline: TAGLINES[dom % TAGLINES.length] }
 }
 
 export function Tool() {
@@ -77,8 +126,8 @@ export function Tool() {
   const [name, setName] = useState('')
   const [nameDone, setNameDone] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
-  // set after mount (not during render) to avoid an SSR/client hydration mismatch
-  const [greeting, setGreeting] = useState('')
+  // set after mount to avoid SSR/client hydration mismatch; re-runs when name is set
+  const [greetingData, setGreetingData] = useState<{ headline: string; tagline: string }>({ headline: '', tagline: '' })
 
   // notification permission flow
   const [notifyPromptVisible, setNotifyPromptVisible] = useState(false)
@@ -89,6 +138,10 @@ export function Tool() {
   // true while the user is parked at the bottom; if they scroll up to read we
   // stop auto-scrolling so the view doesn't fight them during streaming
   const atBottomRef = useRef(true)
+  // distinguishes our own auto-scroll from a real user scroll, and tracks the
+  // last position so any upward drag instantly stops the view from fighting back
+  const programmaticScrollRef = useRef(false)
+  const lastTopRef = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
   const genStartRef = useRef(0)
@@ -102,6 +155,7 @@ export function Tool() {
   const dripRafRef = useRef<number | null>(null)
   const dripDoneRef = useRef(false) // stream finished sending tokens
   const dripFinalRef = useRef<{ grounded: boolean; citations: Citation[] } | null>(null)
+  const dripSpeedRef = useRef(0) // chars/frame, ramps up so reveal eases in slow→fast
 
   useEffect(
     () => () => {
@@ -121,18 +175,36 @@ export function Tool() {
     // (not smooth) because this fires on every streamed frame
     if (!atBottomRef.current) return
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) {
+      // flag this as our scroll so handleScroll doesn't mistake it for the user
+      programmaticScrollRef.current = true
+      el.scrollTop = el.scrollHeight
+      lastTopRef.current = el.scrollTop
+    }
   }, [messages, isGenerating])
 
   const handleScroll = () => {
     const el = scrollRef.current
     if (!el) return
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    // ignore the scroll event our own auto-scroll just produced
+    if (programmaticScrollRef.current) {
+      programmaticScrollRef.current = false
+      lastTopRef.current = el.scrollTop
+      return
+    }
+    // a real user scroll: any upward movement means "let me read" — stop
+    // sticking immediately, even a tiny drag near the bottom. Re-stick only
+    // when they come back to within a hair of the bottom.
+    const movedUp = el.scrollTop < lastTopRef.current - 2
+    lastTopRef.current = el.scrollTop
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (movedUp) atBottomRef.current = false
+    else if (nearBottom) atBottomRef.current = true
   }
 
   useEffect(() => {
-    setGreeting(greetingForHour(new Date().getHours()))
-  }, [])
+    setGreetingData(buildGreeting(name, nameDone))
+  }, [name, nameDone])
 
   const fireNotification = useCallback((elapsed: number) => {
     if (elapsed < 5000) return
@@ -180,6 +252,7 @@ export function Tool() {
     dripShownRef.current = 0
     dripDoneRef.current = false
     dripFinalRef.current = null
+    dripSpeedRef.current = DRIP_START_SPEED
     if (dripRafRef.current != null) {
       cancelAnimationFrame(dripRafRef.current)
       dripRafRef.current = null
@@ -198,15 +271,21 @@ export function Tool() {
       }
     }
 
-    // advance the visible text toward what's been received. The step is
-    // proportional to how far behind we are, so it decelerates to a calm
-    // finish on short gaps but still catches up fast on long bursts.
+    // advance the visible text toward what's been received. The reveal speed
+    // eases IN — it starts slow and accelerates each frame (like Claude), which
+    // feels steadier than a constant rate. A catch-up floor only engages when a
+    // lot of text is buffered, so a big network burst never lags far behind.
     const dripTick = () => {
       const target = dripTargetRef.current
       const shown = dripShownRef.current
       if (shown < target.length) {
         const remaining = target.length - shown
-        const step = Math.max(2, Math.ceil(remaining * 0.2))
+        dripSpeedRef.current = Math.min(DRIP_MAX_SPEED, dripSpeedRef.current * DRIP_RAMP)
+        const catchUp = remaining > 240 ? Math.ceil(remaining * 0.12) : 0
+        const step = Math.min(
+          remaining,
+          Math.max(Math.round(dripSpeedRef.current), catchUp),
+        )
         const next = Math.min(target.length, shown + step)
         dripShownRef.current = next
         const text = target.slice(0, next)
@@ -245,13 +324,36 @@ export function Tool() {
     const controller = new AbortController()
     abortRef.current = controller
 
-    try {
-      const res = await fetch(`${API_BASE}/chat`, {
+    // The free HF Space sleeps after ~15 min idle and takes 30-60s to wake, so
+    // the first request after a nap fails to connect. Retry once after a short
+    // wait and tell the user we're waking the server rather than erroring out.
+    const postChat = () =>
+      fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId, message: question, history, effort, name: name || undefined }),
         signal: controller.signal,
       })
+
+    try {
+      let res: Response
+      try {
+        res = await postChat()
+      } catch (connErr) {
+        if ((connErr as Error)?.name === 'AbortError') throw connErr
+        ensureBubble()
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId ? { ...m, text: 'Waking the server… this can take up to a minute on the first request.' } : m,
+          ),
+        )
+        await new Promise((r) => setTimeout(r, 4000))
+        res = await postChat()
+        // clear the waking notice so the real answer starts fresh
+        dripTargetRef.current = ''
+        dripShownRef.current = 0
+        setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, text: '' } : m)))
+      }
       if (!res.ok || !res.body) throw new Error('chat failed')
 
       const reader = res.body.getReader()
@@ -308,7 +410,7 @@ export function Tool() {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === msgId
-              ? { ...m, done: true, text: 'Couldn’t reach the server. Is the API running?' }
+              ? { ...m, done: true, text: "Couldn't reach the server. Is the API running?" }
               : m,
           ),
         )
@@ -528,9 +630,15 @@ export function Tool() {
           >
             {messages.length === 0 && !isGenerating && (
               <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-4 text-center">
-                {greeting && (
-                  <p className="max-w-md font-heading text-2xl font-medium leading-snug tracking-tight text-foreground md:text-3xl">
-                    {greeting}
+                {greetingData.headline && (
+                  <p className="max-w-sm font-heading text-[32px] font-semibold leading-tight tracking-tight text-foreground md:text-[40px]">
+                    {greetingData.headline}
+                  </p>
+                )}
+
+                {nameDone && greetingData.tagline && (
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {greetingData.tagline}
                   </p>
                 )}
 
@@ -555,15 +663,7 @@ export function Tool() {
                       optional · press Enter to skip
                     </span>
                   </form>
-                ) : name ? (
-                  <p className="text-sm text-muted-foreground">
-                    Got it, {name}. What do you need to find?
-                  </p>
-                ) : hasDocs ? (
-                  <p className="text-sm text-muted-foreground">
-                    Ask anything about your document.
-                  </p>
-                ) : (
+                ) : !hasDocs ? (
                   <>
                     <svg className="h-7 w-7 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
@@ -580,7 +680,7 @@ export function Tool() {
                       Read in memory · never stored
                     </p>
                   </>
-                )}
+                ) : null}
               </div>
             )}
 
@@ -738,10 +838,11 @@ export function Tool() {
                     }
                   }}
                   onPaste={(e) => {
-                    // large pastes collapse into a removable chip instead of
-                    // flooding the composer (matches Claude's behaviour)
+                    // Collapse into a chip only for genuinely large pastes
+                    // (documents, articles). A list of 10 questions is ~600 chars
+                    // and should stay inline so the user can still edit it.
                     const clip = e.clipboardData.getData('text')
-                    if (clip.length > 280) {
+                    if (clip.length > 1200) {
                       e.preventDefault()
                       setPasted((prev) => (prev ? `${prev}\n\n${clip}` : clip))
                     }
@@ -781,6 +882,7 @@ export function Tool() {
 
               {/* effort — the client picks how hard the model thinks */}
               <div className="mt-2 flex items-center gap-1.5">
+                <span className="font-mono text-[10px] text-muted-foreground/70">Effort:</span>
                 {(
                   [
                     ['low', 'Low'],
@@ -823,7 +925,8 @@ function formatTime(ts?: number) {
 // Defined once at module scope, NOT inside the component: passing a fresh
 // components/plugins object on every render makes react-markdown re-parse the
 // whole answer each streamed token (O(n²)), which dropped keystrokes.
-const REMARK_PLUGINS = [remarkGfm]
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeKatex]
 const MD_COMPONENTS: Components = {
   p: (props) => <p className="mb-2 last:mb-0" {...props} />,
   ul: (props) => <ul className="mb-2 list-disc space-y-0.5 pl-5" {...props} />,
@@ -856,8 +959,73 @@ const MD_COMPONENTS: Components = {
 
 /** Strip raw HTML <br> tags the model emits despite the system prompt,
  *  and clip a half-written table row so the parser doesn't render garbage mid-stream. */
+// a backslash-command (\frac, \text…) or a sub/superscript group — i.e. raw TeX
+const TEX_CMD = /\\[a-zA-Z]+|[_^]\{/
+
+/** Repair an odd number of `$$` delimiters. The model occasionally drops an
+ *  opening `$$`, leaving a formula as raw text with a stray trailing `$$`. With
+ *  one orphan delimiter, wrap the preceding raw-TeX run; if that text isn't TeX,
+ *  drop the stray `$$` instead so it doesn't render literally. */
+function repairDisplayMath(s: string): string {
+  const segs = s.split('$$')
+  if (segs.length % 2 === 1) return s // even count of $$ → already balanced
+  const i = segs.length - 2
+  if (TEX_CMD.test(segs[i])) {
+    const m = segs[i].match(/^(\s*)([\s\S]*)$/)!
+    segs[i] = m[1] + '$$' + m[2] // insert the missing opening delimiter
+  } else {
+    segs[i] = segs[i] + segs[i + 1] // not math — merge across the stray $$
+    segs.splice(i + 1, 1)
+  }
+  return segs.join('$$')
+}
+
+/** Content between two `$` signs is math — not currency — when it contains
+ *  TeX commands/scripts (`\`, `^`, `_`) or is a plain decimal/integer ("0.9"). */
+function looksLikeMath(between: string): boolean {
+  // TeX control chars, scripts, or brace-grouping (e.g. the "{,}" thousands
+  // trick) — currency amounts never contain these.
+  if (/[\\^_{}]/.test(between)) return true
+  if (/^\s*\d+(\.\d+)?\s*$/.test(between)) return true
+  return false
+}
+
+/** Escape currency `$` signs so remark-math doesn't pair them as math delimiters.
+ *  Only escapes `$NUMBER` when there is no nearby closing `$` whose enclosed
+ *  content looks like actual math. This prevents `$70k–$95k` from being swallowed
+ *  as a math expression while leaving `$57\%$` and `$0.9$` untouched. */
+function escapeCurrency(s: string): string {
+  return s.replace(/(?<![$\\])\$(?=\d)/g, (_: string, offset: number) => {
+    const rest = s.slice(offset + 1)
+    // Find the next unescaped single $ (skip $$ display delimiters)
+    const closeIdx = rest.search(/(?<!\\)\$(?!\$)/)
+    if (closeIdx < 0 || closeIdx > 80) return '\\$' // no closing $ nearby → currency
+    const between = rest.slice(0, closeIdx)
+    return looksLikeMath(between) ? '$' : '\\$'
+  })
+}
+
+/** Ensure \begin{aligned} (and similar environments) are always wrapped in $$.
+ *  The model sometimes drops the opening $$, leaving raw TeX. We strip any
+ *  partial wrapping and re-add both delimiters cleanly. */
+function normalizeDisplayEnv(s: string): string {
+  return s
+    .replace(/\$?\$?\s*\\begin\{(aligned|align\*?|gather\*?|cases|[pPbBvV]?matrix)\}/g,
+      '\n$$\n\\begin{$1}')
+    .replace(/\\end\{(aligned|align\*?|gather\*?|cases|[pPbBvV]?matrix)\}\s*\$?\$?/g,
+      '\\end{$1}\n$$\n')
+}
+
 function sanitizeMd(text: string): string {
   let out = text.replace(/<br\s*\/?>/gi, '  \n')
+  // The model emits LaTeX with \( \) and \[ \] delimiters, but remark-math only
+  // recognises $ … $ and $$ … $$. Normalise so equations actually render.
+  out = out
+    .replace(/\\\[|\\\]/g, () => '$$')
+    .replace(/\\\(|\\\)/g, () => '$')
+  out = normalizeDisplayEnv(out)
+  out = escapeCurrency(out)
+  out = repairDisplayMath(out)
   const lines = out.split('\n')
   const last = lines[lines.length - 1]
   // an incomplete table row starts with | but doesn't end with one yet
@@ -869,7 +1037,11 @@ function sanitizeMd(text: string): string {
 
 function CruxMarkdown({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MD_COMPONENTS}>
+    <ReactMarkdown
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={REHYPE_PLUGINS}
+      components={MD_COMPONENTS}
+    >
       {sanitizeMd(text)}
     </ReactMarkdown>
   )
@@ -957,13 +1129,6 @@ const MessageBubble = memo(function MessageBubble({
         </span>
       )}
 
-      {/* the exact passage a source chip points to — proof, shown on hover */}
-      {message.done && hoverSnippet && (
-        <div className="fade-in max-w-[85%] rounded-xl border-l-2 border-teal/50 bg-teal/5 px-3 py-2 text-xs italic leading-relaxed text-muted-foreground">
-          “{hoverSnippet}…”
-        </div>
-      )}
-
       {/* meta row: source chips (hover to see the passage) · timestamp · copy-on-hover */}
       {message.done && (
         <div className="flex flex-wrap items-center gap-2">
@@ -1025,6 +1190,18 @@ const MessageBubble = memo(function MessageBubble({
               </>
             )}
           </button>
+        </div>
+      )}
+
+      {/* passage card — appears below the chips when hovering a source */}
+      {message.done && hoverSnippet && (
+        <div className="fade-in max-w-[85%] rounded-lg border border-teal/30 bg-teal/5 px-3.5 py-2.5">
+          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+            Source passage
+          </p>
+          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {hoverSnippet}
+          </p>
         </div>
       )}
     </div>
