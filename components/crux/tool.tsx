@@ -822,6 +822,7 @@ export function Tool() {
                 <textarea
                   ref={inputRef}
                   value={input}
+                  aria-label="Ask a question about your document"
                   rows={1}
                   onChange={(e) => {
                     setInput(e.target.value)

@@ -55,7 +55,7 @@ export function UploadZone({
         transform: `perspective(1000px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
         transition: 'transform 0.15s ease-out',
       }}
-      className={`bracket-card group relative cursor-pointer overflow-hidden rounded-2xl border bg-card p-10 text-center transition-colors duration-200 ${
+      className={`bracket-card group relative cursor-pointer overflow-hidden rounded-2xl border bg-card p-10 text-center transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         dragOver
           ? 'border-accent bg-accent/5'
           : 'border-border hover:border-accent/50'

@@ -39,7 +39,7 @@ export function Hero() {
         >
           <button
             onClick={scrollToTool}
-            className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98]"
+            className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Try it now. No sign-up.
             <span className="transition-transform duration-200 group-hover:translate-x-0.5">
