@@ -20,7 +20,6 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-teal: var(--teal);
   --color-warn: var(--warn);
-  --color-whatsapp: var(--whatsapp);
   --color-primary: var(--accent);
   --color-primary-foreground: var(--accent-foreground);
   --color-input: var(--border);
@@ -47,7 +46,6 @@
   --muted-foreground: #6B635C;
   --teal: #3F7A6B;
   --warn: #B23A2E;
-  --whatsapp: #25d366;
 }
 
 @layer base {
@@ -119,23 +117,6 @@
 
 .crux-particle {
   display: none;
-}
-
-@keyframes drift-a {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(12vw, 8vh) scale(1.1); }
-  66% { transform: translate(-6vw, 14vh) scale(0.95); }
-}
-
-@keyframes drift-b {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(-10vw, -8vh) scale(1.08); }
-  66% { transform: translate(8vw, -4vh) scale(0.92); }
-}
-
-@keyframes breathe-glow {
-  0%, 100% { opacity: 0.75; }
-  50% { opacity: 1; }
 }
 
 @keyframes float-particle {
@@ -220,68 +201,6 @@
 }
 
 /* ============================================
-   CSS 3D HERO FALLBACK — rotating crystalline form
-   ============================================ */
-.crux-crystal {
-  position: relative;
-  width: 280px;
-  height: 280px;
-  transform-style: preserve-3d;
-  animation: crystal-spin 28s linear infinite;
-}
-
-.crux-crystal__face {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(196, 91, 60, 0.20);
-  border-radius: 24px;
-  background: linear-gradient(
-    135deg,
-    rgba(196, 91, 60, 0.05),
-    rgba(214, 160, 110, 0.03)
-  );
-  box-shadow: inset 0 0 40px rgba(196, 91, 60, 0.08);
-  backdrop-filter: blur(2px);
-}
-
-.crux-crystal__core {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 90px;
-  height: 90px;
-  margin: -45px 0 0 -45px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #E5A982, #C45B3C 60%, #8A3D27);
-  box-shadow: 0 0 60px 20px rgba(196, 91, 60, 0.22);
-  animation: core-pulse 6s ease-in-out infinite;
-}
-
-@keyframes crystal-spin {
-  0% { transform: rotateY(0deg) rotateX(12deg); }
-  100% { transform: rotateY(360deg) rotateX(12deg); }
-}
-
-@keyframes core-pulse {
-  0%, 100% { box-shadow: 0 0 60px 20px rgba(196, 91, 60, 0.18); }
-  50% { box-shadow: 0 0 80px 28px rgba(196, 91, 60, 0.30); }
-}
-
-/* Floating sheets around the core (fallback) */
-.crux-sheet {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 120px;
-  height: 150px;
-  margin: -75px 0 0 -60px;
-  border: 1px solid rgba(196, 91, 60, 0.18);
-  border-radius: 8px;
-  background: linear-gradient(160deg, rgba(251, 250, 246, 0.7), rgba(239, 235, 226, 0.5));
-  box-shadow: 0 8px 40px rgba(120, 80, 60, 0.12);
-}
-
-/* ============================================
    SCROLL REVEAL
    ============================================ */
 .reveal {
@@ -361,34 +280,6 @@
   background: rgba(251, 250, 246, 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-}
-
-/* ============================================
-   CORNER BRACKETS — electric green, 20px arms
-   ============================================ */
-.bracket-card {
-  position: relative;
-}
-.bracket-card::before,
-.bracket-card::after {
-  content: '';
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  border-color: rgba(122, 46, 72, 0.55);
-  border-style: solid;
-  pointer-events: none;
-  z-index: 1;
-}
-.bracket-card::before {
-  top: -1px;
-  left: -1px;
-  border-width: 2px 0 0 2px;
-}
-.bracket-card::after {
-  bottom: -1px;
-  right: -1px;
-  border-width: 0 2px 2px 0;
 }
 
 /* ============================================

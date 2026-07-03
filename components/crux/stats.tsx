@@ -16,11 +16,9 @@ function Stat({ value, label }: { value: string; label: string }) {
 export function Stats() {
   return (
     <section className="px-6 py-16">
-      <div className="mx-auto grid max-w-4xl grid-cols-2 gap-y-10 divide-border md:grid-cols-4 md:divide-x">
-        <Stat value="4" label="Native formats: PDF, DOCX, TXT, XLSX" />
-        <Stat value="Seconds" label="From upload to cited answer" />
-        <Stat value="Every" label="Answer cites its source" />
-        <Stat value="Zero" label="Data stored" />
+      <div className="mx-auto grid max-w-2xl grid-cols-2 gap-y-10 divide-x divide-border">
+        <Stat value="4" label="Input types: text, documents, images, audio" />
+        <Stat value="0 bytes" label="Stored by default" />
       </div>
     </section>
   )

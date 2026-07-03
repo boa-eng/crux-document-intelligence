@@ -21,6 +21,10 @@ export function StickyBar() {
     return () => observer.disconnect()
   }, [])
 
+  const scrollToTool = () => {
+    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   return (
     <div
       className={`glass fixed inset-x-0 top-0 z-50 border-b border-border transition-all duration-300 ${
@@ -33,6 +37,13 @@ export function StickyBar() {
         <span className="font-heading text-lg font-semibold tracking-tight text-foreground">
           Crux
         </span>
+        <button
+          type="button"
+          onClick={scrollToTool}
+          className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-accent-foreground transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        >
+          Try Crux
+        </button>
       </div>
     </div>
   )

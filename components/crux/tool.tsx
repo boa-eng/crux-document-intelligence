@@ -10,8 +10,59 @@ import { ThinkingSkeleton } from './thinking-skeleton'
 
 const MAX_MESSAGES = 15
 const MAX_FILES = 10
-const ACCEPTED = '.pdf,.docx,.txt,.xlsx'
+
+// Answer-depth choices, shown in the composer as a Claude-style dropdown.
+// The value is what the backend expects ("effort"); label + blurb are UI only.
+const DEPTHS = [
+  { val: 'low', label: 'Low', desc: 'Fast answer, less digging' },
+  { val: 'medium', label: 'Medium', desc: 'Balanced depth and speed' },
+  { val: 'high', label: 'High', desc: 'Thorough, digs deeper' },
+] as const
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+
+// Convert a recorded clip (webm/opus from MediaRecorder) into a WAV blob right
+// here in the browser, so the mic feature can send the mp3/wav the ASR model
+// expects without any server-side audio conversion. We decode to raw PCM via the
+// Web Audio API, then wrap it in a standard 16-bit PCM WAV container.
+async function webmToWav(blob: Blob): Promise<Blob> {
+  const arrayBuffer = await blob.arrayBuffer()
+  const AudioCtx =
+    window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  const ctx = new AudioCtx()
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+  const numCh = audioBuffer.numberOfChannels
+  const rate = audioBuffer.sampleRate
+  // interleave the channels into one stream of samples
+  const samples = new Float32Array(audioBuffer.length * numCh)
+  for (let ch = 0; ch < numCh; ch++) {
+    const data = audioBuffer.getChannelData(ch)
+    for (let i = 0; i < data.length; i++) samples[i * numCh + ch] = data[i]
+  }
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2))
+  const writeStr = (o: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true) // PCM
+  view.setUint16(22, numCh, true)
+  view.setUint32(24, rate, true)
+  view.setUint32(28, rate * numCh * 2, true)
+  view.setUint16(32, numCh * 2, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+  let offset = 44
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  ctx.close()
+  return new Blob([view], { type: 'audio/wav' })
+}
 
 // Typewriter reveal pacing (chars per animation frame, ~60fps). Eases in:
 // starts slow, multiplies by DRIP_RAMP each frame up to DRIP_MAX_SPEED. Lower
@@ -52,6 +103,8 @@ type Message = {
   grounded?: boolean
   /** true when the user pressed stop before the answer finished */
   interrupted?: boolean
+  /** the documents don't cover this — offer the user a Yes/No before answering from general knowledge */
+  notCovered?: boolean
 }
 
 let idSeq = 1
@@ -144,6 +197,31 @@ export function Tool() {
   const lastTopRef = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
+  const audioInputRef = useRef<HTMLInputElement>(null)
+  // Claude/GPT-style "+" attach menu open/closed
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [depthOpen, setDepthOpen] = useState(false)
+
+  // "Knowledge gaps" panel — what the uploaded documents keep failing to answer.
+  // Only meaningful once a document session exists; the backend itself decides
+  // whether gap data exists at all (Teams/Postgres mode only).
+  const [gapsOpen, setGapsOpen] = useState(false)
+  const [gapsLoading, setGapsLoading] = useState(false)
+  const [gapsSummary, setGapsSummary] = useState('')
+  const [gapsCount, setGapsCount] = useState(0)
+  const [gapsUnavailable, setGapsUnavailable] = useState(false)
+
+  // Screen-reader announcement: only once per finished answer, never mid-stream
+  // (announcing every drip-revealed token would spam a screen reader constantly).
+  const [announceText, setAnnounceText] = useState('')
+  const announcedIdRef = useRef<number | null>(null)
+  // Voice input (mic): record -> transcribe -> drop the words into the box
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [transcribing, setTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const genStartRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   // counts dragenter minus dragleave so crossing child elements doesn't flicker
@@ -154,15 +232,40 @@ export function Tool() {
   const dripShownRef = useRef(0) // how many chars are currently on screen
   const dripRafRef = useRef<number | null>(null)
   const dripDoneRef = useRef(false) // stream finished sending tokens
-  const dripFinalRef = useRef<{ grounded: boolean; citations: Citation[] } | null>(null)
+  const dripFinalRef = useRef<{ grounded: boolean; citations: Citation[]; notCovered: boolean } | null>(null)
   const dripSpeedRef = useRef(0) // chars/frame, ramps up so reveal eases in slow→fast
 
   useEffect(
     () => () => {
       if (dripRafRef.current != null) cancelAnimationFrame(dripRafRef.current)
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
     },
     [],
   )
+
+  // Announce a finished Crux answer to screen readers exactly once — watching
+  // `done` (not the streaming text) keeps this from firing on every drip frame.
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (last && last.role === 'crux' && last.done && announcedIdRef.current !== last.id) {
+      announcedIdRef.current = last.id
+      setAnnounceText(last.text)
+    }
+  }, [messages])
+
+  // Escape closes whichever composer popover menu (or the gaps modal) is open.
+  useEffect(() => {
+    if (!attachOpen && !depthOpen && !gapsOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setAttachOpen(false)
+        setDepthOpen(false)
+        setGapsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [attachOpen, depthOpen, gapsOpen])
 
   // single source of truth: the rate-limit counter is just the user turns so far
   const messageCount = messages.filter((m) => m.role === 'user').length
@@ -242,6 +345,7 @@ export function Tool() {
   const runQuery = async (
     question: string,
     history: { role: string; content: string }[],
+    generalOnly = false,
   ) => {
     setIsGenerating(true)
     setOrbFading(false)
@@ -307,6 +411,7 @@ export function Tool() {
                   flash: true,
                   grounded,
                   sources: grounded ? (final?.citations ?? []).map(parseCitation) : undefined,
+                  notCovered: final?.notCovered === true,
                 }
               : m,
           ),
@@ -331,7 +436,7 @@ export function Tool() {
       fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: question, history, effort, name: name || undefined }),
+        body: JSON.stringify({ session_id: sessionId, message: question, history, effort, name: name || undefined, general_only: generalOnly }),
         signal: controller.signal,
       })
 
@@ -374,6 +479,7 @@ export function Tool() {
             done?: boolean
             grounded?: boolean
             citations?: Citation[]
+            not_covered?: boolean
           }
           try {
             data = JSON.parse(line)
@@ -389,6 +495,7 @@ export function Tool() {
             dripFinalRef.current = {
               grounded: data.grounded === true,
               citations: Array.isArray(data.citations) ? data.citations : [],
+              notCovered: data.not_covered === true,
             }
             dripDoneRef.current = true
             ensureDrip() // flush whatever's left, then finalize
@@ -467,6 +574,23 @@ export function Tool() {
     runQuery(text, history)
   }
 
+  // User said "yes" to a not-covered prompt — re-ask the same question with
+  // general_only so the backend skips retrieval and answers directly.
+  const answerGeneral = (msgId: number, question: string) => {
+    if (isGenerating || limitReached || !question) return
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, notCovered: false } : m)))
+    atBottomRef.current = true
+    const history = messages
+      .filter((m) => m.done && m.text)
+      .map((m) => ({ role: m.role === 'crux' ? 'assistant' : 'user', content: m.text }))
+    runQuery(question, history, true)
+  }
+
+  // User said "no" — just dismiss the prompt, no request needed.
+  const declineGeneral = (msgId: number) => {
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, notCovered: false } : m)))
+  }
+
   const addFiles = (incoming: File[]) => {
     if (incoming.length === 0) return
     const byName = new Map(files.map((f) => [f.name, f]))
@@ -485,6 +609,58 @@ export function Tool() {
     setFiles(next)
     uploadSession(next)
   }
+
+  // ---- Voice input --------------------------------------------------------
+  // Record from the mic, convert to WAV in the browser (MediaRecorder gives
+  // webm, but the ASR model wants mp3/wav), send it to /transcribe, and drop the
+  // spoken words into the message box so a client can talk instead of type.
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const rec = new MediaRecorder(stream)
+      audioChunksRef.current = []
+      rec.ondataavailable = (e) => {
+        if (e.data.size) audioChunksRef.current.push(e.data)
+      }
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setTranscribing(true)
+        try {
+          const wav = await webmToWav(new Blob(audioChunksRef.current, { type: 'audio/webm' }))
+          const form = new FormData()
+          form.append('file', wav, 'recording.wav')
+          const res = await fetch(`${API_BASE}/transcribe`, { method: 'POST', body: form })
+          const data = await res.json()
+          if (data.text) {
+            setInput((prev) => (prev ? `${prev} ${data.text}` : data.text))
+            inputRef.current?.focus()
+          }
+        } catch (e) {
+          console.warn('transcription failed', e)
+        } finally {
+          setTranscribing(false)
+        }
+      }
+      rec.start()
+      mediaRecorderRef.current = rec
+      setIsRecording(true)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+    } catch (e) {
+      console.warn('mic access denied', e)
+    }
+  }
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop()
+    setIsRecording(false)
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+  }
+
+  const toggleRecording = () => (isRecording ? stopRecording() : startRecording())
 
   const handleNotifyChoice = (allow: boolean) => {
     setNotifyPromptVisible(false)
@@ -509,6 +685,29 @@ export function Tool() {
     setUploadError(null)
   }
 
+  const openGaps = async () => {
+    setGapsOpen(true)
+    setGapsLoading(true)
+    setGapsUnavailable(false)
+    try {
+      const res = await fetch(`${API_BASE}/gaps/summary?session_id=${sessionId}`)
+      const data = await res.json()
+      if (data.note) {
+        // Private mode (no database) — the backend says so explicitly rather
+        // than returning an empty summary that would look like "no gaps found".
+        setGapsUnavailable(true)
+      } else {
+        setGapsSummary(data.summary || '')
+        setGapsCount(data.count || 0)
+      }
+    } catch (e) {
+      console.warn('gaps summary failed', e)
+      setGapsUnavailable(true)
+    } finally {
+      setGapsLoading(false)
+    }
+  }
+
   // refill the composer with a previous question to edit and resend (like Claude)
   const editMessage = useCallback((text: string) => {
     setInput(text)
@@ -524,7 +723,7 @@ export function Tool() {
     remaining <= 0
       ? 'text-warn'
       : remaining <= 3
-        ? 'text-amber-600'
+        ? 'text-warn/80'
         : 'text-muted-foreground'
 
   const showHeader = hasDocs || messages.length > 0
@@ -559,35 +758,43 @@ export function Tool() {
             setDragOver(false)
             if (e.dataTransfer.files.length) addFiles(Array.from(e.dataTransfer.files))
           }}
-          className={`bracket-card overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
+          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
             dragOver ? 'border-accent bg-accent/5' : 'border-border'
           }`}
         >
-          {/* Notify bar — slim, top of panel, dismissible */}
-          {notifyPromptVisible && (
-            <div className="fade-in flex items-center justify-between gap-3 border-b border-border bg-surface px-5 py-2.5">
-              <span className="text-sm text-foreground">
-                Want to be notified when your answer is ready?
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleNotifyChoice(true)}
-                  className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:scale-[1.03]"
-                >
-                  Notify me
-                </button>
-                <button
-                  onClick={() => setNotifyPromptVisible(false)}
-                  aria-label="Dismiss"
-                  className="rounded p-1 text-muted-foreground transition hover:text-foreground"
-                >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-                  </svg>
-                </button>
+          {/* Notify bar — slim, top of panel, dismissible. The wrapper is always
+              mounted and animates height via a grid-rows transition so the panel
+              below doesn't jump when the bar appears or is dismissed. */}
+          <div
+            className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out ${
+              notifyPromptVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+            }`}
+          >
+            <div className="min-h-0">
+              <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-5 py-2.5">
+                <span className="text-sm text-foreground">
+                  Want to be notified when your answer is ready?
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleNotifyChoice(true)}
+                    className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
+                  >
+                    Notify me
+                  </button>
+                  <button
+                    onClick={() => setNotifyPromptVisible(false)}
+                    aria-label="Dismiss"
+                    className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
-          )}
+          </div>
 
           {/* Header — file context + visible clear */}
           {showHeader && (
@@ -606,21 +813,96 @@ export function Tool() {
                   'New conversation'
                 )}
               </span>
-              <button
-                onClick={clearSession}
-                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                  <path
-                    d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Clear session
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                {hasDocs && sessionId && (
+                  <button
+                    onClick={openGaps}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+                    </svg>
+                    Knowledge gaps
+                  </button>
+                )}
+                <button
+                  onClick={clearSession}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path
+                      d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Clear session
+                </button>
+              </div>
             </div>
           )}
+
+          {/* Knowledge-gaps panel: what the uploaded documents keep failing to
+              answer. Surfaces a backend feature (/gaps/summary) that already
+              existed with no UI — this is its first visible entry point. */}
+          {gapsOpen && (
+            <>
+              <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm" onClick={() => setGapsOpen(false)} />
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Knowledge gaps"
+                  className="fade-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl"
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="font-heading text-lg font-semibold text-foreground">Knowledge gaps</h2>
+                    <button
+                      onClick={() => setGapsOpen(false)}
+                      aria-label="Close"
+                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {gapsLoading ? (
+                    <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                      <span className="thinking-orb !h-4 !w-4" />
+                      Looking through what your documents couldn&apos;t answer…
+                    </div>
+                  ) : gapsUnavailable ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Knowledge gaps need persistent storage (Teams mode) to track questions across a
+                      session. This deployment is running in Private mode, so nothing is stored to
+                      analyse — by design.
+                    </p>
+                  ) : gapsCount === 0 ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      No gaps yet — every question so far was answered from the documents.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="mb-3 text-xs text-muted-foreground">
+                        Based on {gapsCount} question{gapsCount === 1 ? '' : 's'} your documents couldn&apos;t answer:
+                      </p>
+                      <div className="text-sm leading-relaxed text-card-foreground">
+                        <CruxMarkdown text={gapsSummary} />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Announces a finished answer once, without spamming every streamed token */}
+          <div aria-live="polite" className="sr-only">
+            {announceText}
+          </div>
 
           {/* Messages */}
           <div
@@ -630,40 +912,21 @@ export function Tool() {
           >
             {messages.length === 0 && !isGenerating && (
               <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-4 text-center">
+                {/* Product first, name-ask second: nothing here blocks a first-time
+                    visitor from immediately seeing what Crux does. */}
                 {greetingData.headline && (
-                  <p className="max-w-sm font-heading text-[32px] font-semibold leading-tight tracking-tight text-foreground md:text-[40px]">
+                  <p className="max-w-sm font-heading text-2xl font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
                     {greetingData.headline}
                   </p>
                 )}
 
-                {nameDone && greetingData.tagline && (
+                {greetingData.tagline && (
                   <p className="text-sm font-medium text-muted-foreground">
                     {greetingData.tagline}
                   </p>
                 )}
 
-                {!nameDone ? (
-                  /* asked once on first load — Enter (filled or empty) moves on */
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      setName(nameDraft.trim())
-                      setNameDone(true)
-                    }}
-                    className="flex flex-col items-center gap-1.5"
-                  >
-                    <input
-                      autoFocus
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      placeholder="What should I call you?"
-                      className="w-56 rounded-full border border-border bg-surface px-4 py-1.5 text-center text-sm text-foreground placeholder:text-muted-foreground focus:border-accent focus:outline-none"
-                    />
-                    <span className="font-mono text-[11px] text-muted-foreground/70">
-                      optional · press Enter to skip
-                    </span>
-                  </form>
-                ) : !hasDocs ? (
+                {!hasDocs && (
                   <>
                     <svg className="h-7 w-7 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
@@ -680,12 +943,37 @@ export function Tool() {
                       Read in memory · never stored
                     </p>
                   </>
-                ) : null}
+                )}
+
+                {/* small, optional, non-blocking — never had to be answered to use Crux */}
+                {!nameDone && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      setName(nameDraft.trim())
+                      setNameDone(true)
+                    }}
+                    className="mt-1"
+                  >
+                    <input
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      placeholder="What should I call you? (optional)"
+                      className="w-56 rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none"
+                    />
+                  </form>
+                )}
               </div>
             )}
 
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} onEdit={editMessage} />
+            {messages.map((m, i) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onEdit={editMessage}
+                onAnswerGeneral={() => answerGeneral(m.id, messages[i - 1]?.text ?? '')}
+                onDeclineGeneral={() => declineGeneral(m.id)}
+              />
             ))}
 
             {isGenerating && (
@@ -712,12 +1000,6 @@ export function Tool() {
 
           {/* Composer */}
           <div className="border-t border-border p-4">
-            {messageCount > 0 && (
-              <p className={`mb-2 text-right font-mono text-xs ${counterColor}`}>
-                {remaining} message{remaining === 1 ? '' : 's'} remaining
-              </p>
-            )}
-
             <div className="rounded-2xl border border-border bg-surface px-3 pb-2.5 pt-3 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(122,46,72,0.16)]">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
@@ -746,21 +1028,29 @@ export function Tool() {
                 </div>
               )}
 
-              {/* upload status */}
-              {uploading && (
-                <p className="mb-2 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-                  <span className="thinking-orb !h-3 !w-3" />
-                  Reading your document…
-                </p>
-              )}
-              {fileLimitWarn && (
-                <p className="mb-2 font-mono text-[11px] text-warn">
-                  Only {MAX_FILES} documents per session — extra files were skipped.
-                </p>
-              )}
-              {uploadError && (
-                <p className="mb-2 font-mono text-[11px] text-warn">{uploadError}</p>
-              )}
+              {/* upload status — one animated slot so these don't pop the textarea around */}
+              <div
+                className={`grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out ${
+                  uploading || fileLimitWarn || uploadError ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                }`}
+              >
+                <div className="min-h-0">
+                  {uploading && (
+                    <p className="mb-2 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                      <span className="thinking-orb !h-3 !w-3" />
+                      Reading your document…
+                    </p>
+                  )}
+                  {fileLimitWarn && (
+                    <p className="mb-2 font-mono text-[11px] text-warn">
+                      Only {MAX_FILES} documents per session — extra files were skipped.
+                    </p>
+                  )}
+                  {uploadError && (
+                    <p className="mb-2 font-mono text-[11px] text-warn">{uploadError}</p>
+                  )}
+                </div>
+              </div>
 
               {/* pasted-text chip — collapsed, hover to remove (like Claude) */}
               {pasted && (
@@ -787,38 +1077,39 @@ export function Tool() {
                 </div>
               )}
 
-              {/* input row: [+ add] [text] [send arrow] */}
+              {/* composer — message field on top, controls below (Claude-style) */}
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
                   send(input)
                 }}
-                className="flex items-end gap-2"
+                className="flex flex-col gap-2"
               >
+                {/* hidden pickers: one for files & photos, one for audio */}
                 <input
                   ref={addInputRef}
                   type="file"
                   multiple
-                  accept={ACCEPTED}
+                  accept=".pdf,.docx,.txt,.xlsx,.csv,.png,.jpg,.jpeg,.webp"
                   className="hidden"
                   onChange={(e) => {
                     addFiles(Array.from(e.target.files ?? []))
                     e.target.value = ''
                   }}
                 />
-                <button
-                  type="button"
-                  onClick={() => addInputRef.current?.click()}
-                  disabled={files.length >= MAX_FILES}
-                  aria-label="Add documents"
-                  title="Add documents"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:border-accent/50 hover:text-accent disabled:opacity-40"
-                >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-                  </svg>
-                </button>
+                <input
+                  ref={audioInputRef}
+                  type="file"
+                  multiple
+                  accept=".mp3,.wav"
+                  className="hidden"
+                  onChange={(e) => {
+                    addFiles(Array.from(e.target.files ?? []))
+                    e.target.value = ''
+                  }}
+                />
 
+                {/* the message field, full width on top */}
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -826,7 +1117,6 @@ export function Tool() {
                   rows={1}
                   onChange={(e) => {
                     setInput(e.target.value)
-                    // auto-grow up to a few lines
                     e.target.style.height = 'auto'
                     e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
                   }}
@@ -839,9 +1129,6 @@ export function Tool() {
                     }
                   }}
                   onPaste={(e) => {
-                    // Collapse into a chip only for genuinely large pastes
-                    // (documents, articles). A list of 10 questions is ~600 chars
-                    // and should stay inline so the user can still edit it.
                     const clip = e.clipboardData.getData('text')
                     if (clip.length > 1200) {
                       e.preventDefault()
@@ -850,66 +1137,205 @@ export function Tool() {
                   }}
                   disabled={limitReached}
                   placeholder={
-                    hasDocs ? 'Ask anything about your document…' : 'Write a message…'
+                    isRecording
+                      ? 'Listening…'
+                      : hasDocs
+                        ? 'Ask anything about your document…'
+                        : 'Write a message…'
                   }
-                  className="min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+                  className="max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
                 />
 
-                {isGenerating ? (
-                  <button
-                    type="button"
-                    onClick={stopGenerating}
-                    aria-label="Stop"
-                    title="Stop generating"
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition hover:scale-105"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                      <rect x="7" y="7" width="10" height="10" rx="1.5" />
-                    </svg>
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={limitReached || (!input.trim() && !pasted)}
-                    aria-label="Send"
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:scale-105 disabled:opacity-30"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                )}
-              </form>
+                {/* controls row: [+] on the left, effort · mic · send on the right */}
+                <div className="flex items-center justify-between gap-2">
+                  {/* "+" attach button with a Claude-style pop-up menu */}
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setAttachOpen((o) => !o)}
+                      disabled={files.length >= MAX_FILES}
+                      aria-label="Add attachment"
+                      aria-expanded={attachOpen}
+                      title="Add files, photos or audio"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-accent disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                      </svg>
+                    </button>
 
-              {/* effort — the client picks how hard the model thinks */}
-              <div className="mt-2 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] text-muted-foreground/70">Effort:</span>
-                {(
-                  [
-                    ['low', 'Low'],
-                    ['medium', 'Medium'],
-                    ['high', 'High'],
-                  ] as const
-                ).map(([val, label]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    aria-pressed={effort === val}
-                    onClick={() => setEffort(val)}
-                    className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] transition ${
-                      effort === val
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+                    {attachOpen && (
+                      <>
+                        {/* click-away layer */}
+                        <div className="fixed inset-0 z-10" onClick={() => setAttachOpen(false)} />
+                        {/* menu opens upward, since the bar sits at the bottom */}
+                        <div className="fade-in absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachOpen(false)
+                              addInputRef.current?.click()
+                            }}
+                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted"
+                          >
+                            <svg className="h-[18px] w-[18px] text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                              <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Add files or photos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachOpen(false)
+                              audioInputRef.current?.click()
+                            }}
+                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition hover:bg-muted"
+                          >
+                            <svg className="h-[18px] w-[18px] text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                              <path d="M9 18V5l12-2v13" strokeLinecap="round" strokeLinejoin="round" />
+                              <circle cx="6" cy="18" r="3" />
+                              <circle cx="18" cy="16" r="3" />
+                            </svg>
+                            Add audio file
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* effort · mic · send */}
+                  <div className="flex items-center gap-2">
+                    {/* effort — answer-depth dropdown, Claude model-picker style */}
+                    <div className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setDepthOpen((o) => !o)}
+                        aria-haspopup="true"
+                        aria-expanded={depthOpen}
+                        aria-label="Answer depth"
+                        title="Answer depth"
+                        className="flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      >
+                        {DEPTHS.find((d) => d.val === effort)?.label}
+                        <svg
+                          className={`h-3.5 w-3.5 transition-transform ${depthOpen ? 'rotate-180' : ''}`}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        >
+                          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+
+                      {depthOpen && (
+                        <>
+                          {/* click-away layer */}
+                          <div className="fixed inset-0 z-10" onClick={() => setDepthOpen(false)} />
+                          {/* menu opens upward and right-aligned so it stays on-screen */}
+                          <div
+                            role="radiogroup"
+                            aria-label="Answer depth"
+                            className="fade-in absolute bottom-full right-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl"
+                          >
+                            {DEPTHS.map((d) => (
+                              <button
+                                key={d.val}
+                                type="button"
+                                role="radio"
+                                aria-checked={effort === d.val}
+                                onClick={() => {
+                                  setEffort(d.val)
+                                  setDepthOpen(false)
+                                }}
+                                className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2 text-left transition hover:bg-muted"
+                              >
+                                <svg
+                                  className={`mt-0.5 h-4 w-4 shrink-0 text-accent transition-opacity ${effort === d.val ? 'opacity-100' : 'opacity-0'}`}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.2"
+                                >
+                                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                                <span>
+                                  <span className="block text-sm font-medium text-foreground">{d.label}</span>
+                                  <span className="block text-xs text-muted-foreground">{d.desc}</span>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* mic — record voice, transcribe into the box */}
+                    {isRecording && (
+                      <span className="text-[11px] font-medium tabular-nums text-warn">
+                        {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={toggleRecording}
+                      disabled={limitReached || transcribing}
+                      aria-label={isRecording ? 'Stop recording' : 'Record voice'}
+                      title={isRecording ? 'Stop recording' : transcribing ? 'Transcribing…' : 'Record voice'}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                        isRecording
+                          ? 'animate-pulse bg-warn/10 text-warn'
+                          : 'text-muted-foreground hover:bg-muted hover:text-accent'
+                      }`}
+                    >
+                      {transcribing ? (
+                        <span className="thinking-orb !h-3.5 !w-3.5" />
+                      ) : (
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                          <rect x="9" y="2" width="6" height="12" rx="3" />
+                          <path d="M5 10a7 7 0 0 0 14 0M12 17v4" strokeLinecap="round" />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* send / stop */}
+                    {isGenerating ? (
+                      <button
+                        type="button"
+                        onClick={stopGenerating}
+                        aria-label="Stop"
+                        title="Stop generating"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                          <rect x="7" y="7" width="10" height="10" rx="1.5" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={limitReached || (!input.trim() && !pasted)}
+                        aria-label="Send"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:bg-accent/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
             </div>
 
             <p className="mt-3 text-center text-xs text-muted-foreground">
               Crux can make mistakes. Double-check the source.
+              {messageCount > 0 && (
+                <span className={counterColor}>
+                  {' '}
+                  · {remaining} message{remaining === 1 ? '' : 's'} remaining
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -935,7 +1361,7 @@ const MD_COMPONENTS: Components = {
   strong: (props) => <strong className="font-semibold text-foreground" {...props} />,
   a: (props) => <a className="text-accent underline" {...props} target="_blank" rel="noopener noreferrer" />,
   pre: (props) => (
-    <pre className="my-3 overflow-x-auto rounded-xl bg-zinc-900 p-4 text-[12px] font-mono leading-relaxed text-zinc-200" {...props} />
+    <pre className="my-3 overflow-x-auto rounded-xl bg-[#2A2320] p-4 text-[12px] font-mono leading-relaxed text-[#E8DFD6]" {...props} />
   ),
   code: ({ className, children, ...props }) => {
     // block code: has a language-xxx class (fenced) or is multiline (unfenced)
@@ -1051,13 +1477,27 @@ function CruxMarkdown({ text }: { text: string }) {
 const MessageBubble = memo(function MessageBubble({
   message,
   onEdit,
+  onAnswerGeneral,
+  onDeclineGeneral,
 }: {
   message: Message
   onEdit?: (text: string) => void
+  onAnswerGeneral?: () => void
+  onDeclineGeneral?: () => void
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
-  const [hoverSnippet, setHoverSnippet] = useState<string | null>(null)
+  // Which source chip's passage popover is open, if any. Click-to-toggle so it
+  // works on touch and keyboard, not just mouse hover.
+  const [openSourceIdx, setOpenSourceIdx] = useState<number | null>(null)
+  useEffect(() => {
+    if (openSourceIdx === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenSourceIdx(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openSourceIdx])
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // clear the "Copied" reset timer if the bubble unmounts first (e.g. Clear session)
@@ -1080,12 +1520,12 @@ const MessageBubble = memo(function MessageBubble({
           {message.text}
         </div>
         {/* hover actions: edit (resend) · copy — like Claude */}
-        <div className="flex items-center gap-2 opacity-0 transition group-hover/user:opacity-100">
+        <div className="flex items-center gap-2 opacity-0 transition focus-within:opacity-100 group-hover/user:opacity-100">
           {onEdit && (
             <button
               onClick={() => onEdit(message.text)}
               aria-label="Edit and resend"
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
                 <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" strokeLinecap="round" strokeLinejoin="round" />
@@ -1096,7 +1536,7 @@ const MessageBubble = memo(function MessageBubble({
           <button
             onClick={copyText}
             aria-label="Copy message"
-            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground"
+            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             {copied ? 'Copied' : 'Copy'}
           </button>
@@ -1130,23 +1570,62 @@ const MessageBubble = memo(function MessageBubble({
         </span>
       )}
 
-      {/* meta row: source chips (hover to see the passage) · timestamp · copy-on-hover */}
+      {/* documents didn't cover this — ask before answering from general knowledge */}
+      {message.done && message.notCovered && (
+        <div className="fade-in flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Answer from general knowledge?</span>
+          <button
+            type="button"
+            onClick={onAnswerGeneral}
+            className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            Yes
+          </button>
+          <button
+            type="button"
+            onClick={onDeclineGeneral}
+            className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            No
+          </button>
+        </div>
+      )}
+
+      {/* meta row: source chips (click or hover to see the passage) · timestamp · copy-on-hover */}
       {message.done && (
         <div className="flex flex-wrap items-center gap-2">
           {message.sources && message.sources.length > 0 ? (
-            message.sources.map((s) => (
-              <span
-                key={`${s.file}-${s.page}`}
-                onMouseEnter={() => setHoverSnippet(s.snippet ?? null)}
-                onMouseLeave={() => setHoverSnippet(null)}
-                title="Hover to see the exact passage"
-                className="fade-in inline-flex cursor-help items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {s.page ? `${s.file} · Page ${s.page}` : s.file}
-              </span>
+            message.sources.map((s, i) => (
+              <div key={`${s.file}-${s.page}`} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
+                  onMouseEnter={() => setOpenSourceIdx(i)}
+                  aria-expanded={openSourceIdx === i}
+                  title="See the exact passage"
+                  className="fade-in inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {s.page ? `${s.file} · Page ${s.page}` : s.file}
+                </button>
+
+                {/* popover anchored to this chip — never pushes later messages down */}
+                {openSourceIdx === i && s.snippet && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setOpenSourceIdx(null)} />
+                    <div className="fade-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-[80vw] rounded-lg border border-teal/30 bg-teal/5 px-3.5 py-2.5 shadow-lg">
+                      <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+                        Source passage
+                      </p>
+                      <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+                        {s.snippet}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
             ))
           ) : (
             message.grounded === false && (
@@ -1191,18 +1670,6 @@ const MessageBubble = memo(function MessageBubble({
               </>
             )}
           </button>
-        </div>
-      )}
-
-      {/* passage card — appears below the chips when hovering a source */}
-      {message.done && hoverSnippet && (
-        <div className="fade-in max-w-[85%] rounded-lg border border-teal/30 bg-teal/5 px-3.5 py-2.5">
-          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-            Source passage
-          </p>
-          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-            {hoverSnippet}
-          </p>
         </div>
       )}
     </div>

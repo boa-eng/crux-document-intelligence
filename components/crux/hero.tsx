@@ -20,7 +20,7 @@ export function Hero() {
         </p>
 
         <h1
-          className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-8xl lg:text-9xl"
+          className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
           style={{ animationDelay: '50ms' }}
         >
           Ask your documents anything.
