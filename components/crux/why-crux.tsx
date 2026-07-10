@@ -17,8 +17,7 @@ export function WhyCrux() {
         className={`mx-auto max-w-2xl text-center reveal ${visible ? 'is-visible' : ''}`}
       >
         <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance md:text-4xl">
-          Your team already has the answers. They just can&apos;t find them fast
-          enough.
+          Your team already wrote the answer. Crux remembers where.
         </h2>
         <div className="mt-10 flex flex-col gap-4">
           {VALUES.map((v) => (

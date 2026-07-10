@@ -23,14 +23,15 @@ export function Hero() {
           className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
           style={{ animationDelay: '50ms' }}
         >
-          Ask your documents anything.
+          Ask your documents anything. Every answer comes with proof.
         </h1>
 
         <p
           className="fade-up mt-6 text-lg font-medium text-muted-foreground md:text-xl"
           style={{ animationDelay: '100ms' }}
         >
-          Cited sources. Every answer.
+          Crux reads every report, standard, and record your firm has ever produced, and
+          answers with the source.
         </p>
 
         <div
@@ -41,7 +42,7 @@ export function Hero() {
             onClick={scrollToTool}
             className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            Try it now. No sign-up.
+            Ask your first question
             <span className="transition-transform duration-200 group-hover:translate-x-0.5">
               →
             </span>
@@ -49,7 +50,14 @@ export function Hero() {
         </div>
 
         <p
-          className="fade-up mt-8 max-w-md text-sm leading-relaxed text-muted-foreground"
+          className="fade-up mt-4 text-sm text-muted-foreground"
+          style={{ animationDelay: '175ms' }}
+        >
+          And when your documents don&apos;t have the answer, Crux says so.
+        </p>
+
+        <p
+          className="fade-up mt-4 max-w-md text-sm leading-relaxed text-muted-foreground"
           style={{ animationDelay: '200ms' }}
         >
           No account. Nothing stored. Your files leave when you do.

@@ -13,7 +13,7 @@ export function ThinkingSkeleton({ fading }: { fading?: boolean }) {
       role="status"
       aria-label="Crux is thinking"
     >
-      <div className="w-full max-w-[85%] space-y-2.5 rounded-2xl rounded-bl-sm border border-border bg-card px-4 py-4">
+      <div className="w-full max-w-lg space-y-2.5 py-1">
         <div className="skeleton-line h-2.5 w-[92%]" />
         <div className="skeleton-line h-2.5 w-[80%]" />
         <div className="skeleton-line h-2.5 w-[58%]" />

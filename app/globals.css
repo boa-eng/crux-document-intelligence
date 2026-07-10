@@ -268,6 +268,28 @@
   animation: border-flash 0.4s ease forwards;
 }
 
+/* completion cue for un-boxed assistant text (no border to flash, so a
+   soft background highlight fades out instead) */
+@keyframes text-flash {
+  0% { background-color: color-mix(in srgb, var(--accent) 10%, transparent); }
+  100% { background-color: transparent; }
+}
+.text-flash {
+  animation: text-flash 0.6s ease forwards;
+  border-radius: 8px;
+}
+
+/* newest streamed word softly resolves in, rather than popping or being
+   typed letter by letter */
+@keyframes word-reveal {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+.word-reveal {
+  display: inline-block;
+  animation: word-reveal 150ms ease-out;
+}
+
 @keyframes bounce-chevron {
   0%, 100% { transform: translateY(0); opacity: 0.5; }
   50% { transform: translateY(8px); opacity: 1; }

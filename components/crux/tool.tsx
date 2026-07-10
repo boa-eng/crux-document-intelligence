@@ -65,11 +65,12 @@ async function webmToWav(blob: Blob): Promise<Blob> {
 }
 
 // Typewriter reveal pacing (chars per animation frame, ~60fps). Eases in:
-// starts slow, multiplies by DRIP_RAMP each frame up to DRIP_MAX_SPEED. Lower
-// DRIP_START_SPEED / DRIP_MAX_SPEED for an overall slower, calmer stream.
+// starts slow, multiplies by DRIP_RAMP each frame up to DRIP_MAX_SPEED. Tuned
+// to Claude.ai's reading-pace roll, not a network-speed dump — the ceiling is
+// a comfortable reading speed, not "as fast as the buffer allows."
 const DRIP_START_SPEED = 1.2 // ~72 chars/sec at the very start — deliberately slow
-const DRIP_RAMP = 1.06 // acceleration per frame
-const DRIP_MAX_SPEED = 40 // ceiling, ~2400 chars/sec when fully ramped
+const DRIP_RAMP = 1.02 // gentle acceleration per frame
+const DRIP_MAX_SPEED = 9 // ceiling, ~540 chars/sec — reading pace, not a burst
 
 type Citation = { label: string; snippet?: string }
 
@@ -105,6 +106,8 @@ type Message = {
   interrupted?: boolean
   /** the documents don't cover this — offer the user a Yes/No before answering from general knowledge */
   notCovered?: boolean
+  /** the user's thumbs up/down on this answer, if they gave one */
+  rating?: 'up' | 'down'
 }
 
 let idSeq = 1
@@ -113,12 +116,12 @@ let idSeq = 1
  *  on every load. Document-work focused, Apple-level concise. */
 const TAGLINES = [
   'The answer is already in there.',
-  'Ask anything. Crux finds it.',
+  'Ask anything. Every answer comes with proof.',
   'Every claim, backed by the source.',
-  'Find the exact line, not a paraphrase.',
-  'Cited sources. Every answer.',
+  'Nothing made up. Every word traceable.',
+  'Stop searching. Start asking.',
   'Your documents are waiting.',
-  'Precision retrieval. Plain language.',
+  'Your team already wrote the answer. Crux remembers where.',
 ]
 
 /** Build a Claude-style greeting: day/time-aware headline + rotating tagline.
@@ -375,22 +378,41 @@ export function Tool() {
       }
     }
 
-    // advance the visible text toward what's been received. The reveal speed
-    // eases IN — it starts slow and accelerates each frame (like Claude), which
-    // feels steadier than a constant rate. A catch-up floor only engages when a
-    // lot of text is buffered, so a big network burst never lags far behind.
+    // advance the visible text toward what's been received, one whole word at
+    // a time — never mid-word, which is what makes each word feel like it
+    // softly resolves instead of a teletype spraying letters. The reveal
+    // speed eases in (starts slow, accelerates each frame, like Claude). A
+    // modest catch-up (at most 2x the current pace) engages when a lot of
+    // text is buffered, so a big network burst never lags far behind — but it
+    // never dumps a percentage of the backlog in one frame like before.
     const dripTick = () => {
       const target = dripTargetRef.current
       const shown = dripShownRef.current
       if (shown < target.length) {
-        const remaining = target.length - shown
         dripSpeedRef.current = Math.min(DRIP_MAX_SPEED, dripSpeedRef.current * DRIP_RAMP)
-        const catchUp = remaining > 240 ? Math.ceil(remaining * 0.12) : 0
-        const step = Math.min(
-          remaining,
-          Math.max(Math.round(dripSpeedRef.current), catchUp),
+        const rampedSpeed = dripSpeedRef.current
+        const remaining = target.length - shown
+        const budget = Math.round(
+          remaining > rampedSpeed * 3 ? rampedSpeed * 2 : rampedSpeed,
         )
-        const next = Math.min(target.length, shown + step)
+        // walk forward token by token (a token is one word or one run of
+        // whitespace) until we've spent at least `budget` chars, snapping to
+        // the token boundary rather than a raw char count.
+        const remainder = target.slice(shown)
+        const tokens = remainder.match(/\S+|\s+/g) ?? []
+        let spent = 0
+        let next = shown
+        for (let i = 0; i < tokens.length; i++) {
+          const tok = tokens[i]
+          const isLastToken = i === tokens.length - 1
+          // the last token in the buffer might be a word the network hasn't
+          // finished sending yet — hold it back until more arrives, unless
+          // the stream is done and nothing more is ever coming
+          if (isLastToken && !dripDoneRef.current && /\S/.test(tok)) break
+          next += tok.length
+          spent += tok.length
+          if (spent >= budget) break
+        }
         dripShownRef.current = next
         const text = target.slice(0, next)
         setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, text } : m)))
@@ -591,6 +613,17 @@ export function Tool() {
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, notCovered: false } : m)))
   }
 
+  // Thumbs up/down on an answer. Optimistic — the UI locks in the choice
+  // immediately; if the POST fails we just log it, never block reading.
+  const sendFeedback = (msgId: number, question: string, answer: string, rating: 'up' | 'down') => {
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating } : m)))
+    fetch(`${API_BASE}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, question, answer, rating }),
+    }).catch((err) => console.error('feedback failed', err))
+  }
+
   const addFiles = (incoming: File[]) => {
     if (incoming.length === 0) return
     const byName = new Map(files.map((f) => [f.name, f]))
@@ -730,7 +763,7 @@ export function Tool() {
 
   return (
     <section id="tool" className="relative px-6 py-20 md:py-28">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-3xl lg:max-w-4xl">
         {/* Chat panel — always present, whole panel is a drop target */}
         <div
           onDragEnter={(e) => {
@@ -973,6 +1006,9 @@ export function Tool() {
                 onEdit={editMessage}
                 onAnswerGeneral={() => answerGeneral(m.id, messages[i - 1]?.text ?? '')}
                 onDeclineGeneral={() => declineGeneral(m.id)}
+                onFeedback={(rating) =>
+                  sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating)
+                }
               />
             ))}
 
@@ -1462,15 +1498,66 @@ function sanitizeMd(text: string): string {
   return lines.join('\n')
 }
 
-function CruxMarkdown({ text }: { text: string }) {
+/** Split off the paragraph currently being typed (after the last blank
+ *  line) from everything already settled above it. Only the active
+ *  paragraph needs word-fade handling — once a blank line closes it, it
+ *  moves into the fully-parsed markdown history below, where bold/tables/
+ *  code render correctly again. */
+function splitLastParagraph(text: string): { prior: string; current: string } {
+  const idx = text.lastIndexOf('\n\n')
+  if (idx === -1) return { prior: '', current: text }
+  return { prior: text.slice(0, idx), current: text.slice(idx + 2) }
+}
+
+/** Split the active paragraph into its markdown-safe settled prefix and the
+ *  newest word, so only the newest word gets the reveal-fade span. */
+function splitTrailingWord(text: string): { settled: string; trailing: string } {
+  const m = text.match(/\S+\s*$/)
+  const trailing = m ? m[0] : ''
+  const settled = trailing ? text.slice(0, text.length - trailing.length) : text
+  return { settled, trailing }
+}
+
+function CruxMarkdown({ text, streaming }: { text: string; streaming?: boolean }) {
+  if (!streaming) {
+    return (
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={MD_COMPONENTS}
+      >
+        {sanitizeMd(text)}
+      </ReactMarkdown>
+    )
+  }
+  // While streaming, everything up to the last completed paragraph renders
+  // as normal markdown (safe — it's finished text). The paragraph still
+  // being typed renders as plain text with its newest word wrapped in a
+  // fading span, inline in the same <p> so it doesn't break onto its own
+  // line — that's the word-by-word "soft resolve" texture, without
+  // re-animating words that already settled on screen.
+  const { prior, current } = splitLastParagraph(text)
+  const { settled, trailing } = splitTrailingWord(current)
   return (
-    <ReactMarkdown
-      remarkPlugins={REMARK_PLUGINS}
-      rehypePlugins={REHYPE_PLUGINS}
-      components={MD_COMPONENTS}
-    >
-      {sanitizeMd(text)}
-    </ReactMarkdown>
+    <>
+      {prior && (
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={MD_COMPONENTS}
+        >
+          {sanitizeMd(prior)}
+        </ReactMarkdown>
+      )}
+      <p className="mb-2 whitespace-pre-wrap last:mb-0">
+        {settled}
+        {trailing && (
+          <span key={text.length} className="word-reveal">
+            {trailing}
+          </span>
+        )}
+      </p>
+    </>
   )
 }
 
@@ -1479,11 +1566,13 @@ const MessageBubble = memo(function MessageBubble({
   onEdit,
   onAnswerGeneral,
   onDeclineGeneral,
+  onFeedback,
 }: {
   message: Message
   onEdit?: (text: string) => void
   onAnswerGeneral?: () => void
   onDeclineGeneral?: () => void
+  onFeedback?: (rating: 'up' | 'down') => void
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -1553,13 +1642,14 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <div className="group message-in flex flex-col items-start gap-2">
       <div
-        className={`max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-surface px-4 py-3 text-sm leading-relaxed text-card-foreground ${
-          message.flash ? 'border-flash' : ''
+        className={`w-full text-sm leading-relaxed text-card-foreground ${
+          message.flash ? 'text-flash' : ''
         }`}
       >
         {/* render Markdown live so bold/tables/lists look right while streaming,
-            not raw ** and <br>; a caret marks that it's still typing */}
-        <CruxMarkdown text={message.text} />
+            not raw ** and <br>; word-reveal fades in the newest word while
+            streaming; a caret marks that it's still typing */}
+        <CruxMarkdown text={message.text} streaming={!message.done} />
         {!message.done && <span className="stream-caret" />}
       </div>
 
@@ -1646,6 +1736,43 @@ const MessageBubble = memo(function MessageBubble({
             <span className="font-mono text-[11px] text-muted-foreground/70">
               {formatTime(message.ts)}
             </span>
+          )}
+
+          {onFeedback && (
+            <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+              <button
+                type="button"
+                onClick={() => onFeedback('up')}
+                disabled={!!message.rating}
+                aria-label="Good answer"
+                aria-pressed={message.rating === 'up'}
+                className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                  message.rating === 'up'
+                    ? 'text-accent'
+                    : 'text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground'
+                }`}
+              >
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'up' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
+                  <path d="M7 22V11M2 13v7a2 2 0 0 0 2 2h12.5a2 2 0 0 0 1.98-1.7l1.2-8A2 2 0 0 0 17.7 10H14V5a2 2 0 0 0-2-2l-3 7v10" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => onFeedback('down')}
+                disabled={!!message.rating}
+                aria-label="Bad answer"
+                aria-pressed={message.rating === 'down'}
+                className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                  message.rating === 'down'
+                    ? 'text-warn'
+                    : 'text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground'
+                }`}
+              >
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'down' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
+                  <path d="M17 2v11M22 11V4a2 2 0 0 0-2-2H7.5a2 2 0 0 0-1.98 1.7l-1.2 8A2 2 0 0 0 6.3 14H10v5a2 2 0 0 0 2 2l3-7V2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
           )}
 
           <button
