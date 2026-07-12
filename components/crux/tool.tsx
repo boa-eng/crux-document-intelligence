@@ -1569,13 +1569,41 @@ function CruxMarkdown({ text, streaming }: { text: string; streaming?: boolean }
     )
   }
   // While streaming, everything up to the last completed paragraph renders
-  // as normal markdown (safe — it's finished text). The paragraph still
-  // being typed renders as plain text with its newest word wrapped in a
-  // fading span, inline in the same <p> so it doesn't break onto its own
-  // line — that's the word-by-word "soft resolve" texture, without
-  // re-animating words that already settled on screen.
+  // as normal markdown (safe — it's finished text). The paragraph still being
+  // typed is ALSO run through remend + ReactMarkdown now, not left as raw
+  // text — that raw-text path was the actual bug: it's what's on screen for
+  // most of the stream, so any **bold, a heading, or a table row being typed
+  // showed its literal markdown characters the whole time. remend closes
+  // whatever marker hasn't streamed its match yet (e.g. a dangling **) so the
+  // parser renders it instead of choking on it. Only the newest word still
+  // gets the fade-reveal span, spliced into the last real <p> so it stays
+  // inline instead of dropping onto its own line.
   const { prior, current } = splitLastParagraph(text)
   const { settled, trailing } = splitTrailingWord(current)
+  // How many <p> elements ReactMarkdown will actually render for `settled` —
+  // used below to find the LAST one so the fade span lands in the right spot
+  // (if settled's last block is a heading/table/code fence instead, the word
+  // is simply not spliced in for this one frame; it renders correctly a beat
+  // later once more text confirms which block it belongs to).
+  const settledParagraphCount = settled.split(/\n{2,}/).filter((p) => p.trim()).length
+  let pIndex = 0
+  const currentComponents: Components = {
+    ...MD_COMPONENTS,
+    p: ({ children, ...props }) => {
+      pIndex += 1
+      const isLast = pIndex === settledParagraphCount
+      return (
+        <p className="mb-2 last:mb-0" {...props}>
+          {children}
+          {isLast && trailing && (
+            <span key={text.length} className="word-reveal">
+              {trailing}
+            </span>
+          )}
+        </p>
+      )
+    },
+  }
   return (
     <>
       {prior && (
@@ -1584,21 +1612,26 @@ function CruxMarkdown({ text, streaming }: { text: string; streaming?: boolean }
           rehypePlugins={REHYPE_PLUGINS}
           components={MD_COMPONENTS}
         >
-          {/* remend closes any bold/italic/code/table marker whose match hasn't
-              streamed in yet, so a dangling ** doesn't swallow everything after
-              it (headings, tables, code fences) as raw text until it flickers
-              into place once the closing marker finally arrives */}
           {remend(sanitizeMd(prior))}
         </ReactMarkdown>
       )}
-      <p className="mb-2 whitespace-pre-wrap last:mb-0">
-        {settled}
-        {trailing && (
-          <span key={text.length} className="word-reveal">
-            {trailing}
-          </span>
-        )}
-      </p>
+      {settled ? (
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={currentComponents}
+        >
+          {remend(sanitizeMd(settled))}
+        </ReactMarkdown>
+      ) : (
+        trailing && (
+          <p className="mb-2 whitespace-pre-wrap last:mb-0">
+            <span key={text.length} className="word-reveal">
+              {trailing}
+            </span>
+          </p>
+        )
+      )}
     </>
   )
 }
