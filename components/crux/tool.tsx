@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import remend from 'remend'
 import 'katex/dist/katex.min.css'
 import { ThinkingSkeleton } from './thinking-skeleton'
 
@@ -614,13 +615,31 @@ export function Tool() {
   }
 
   // Thumbs up/down on an answer. Optimistic — the UI locks in the choice
-  // immediately; if the POST fails we just log it, never block reading.
-  const sendFeedback = (msgId: number, question: string, answer: string, rating: 'up' | 'down') => {
+  // immediately; if the POST fails we just log it, never block reading. Ratings
+  // are switchable, so this can fire twice for one down-vote: once immediately
+  // (rating only) and once more from the "what went wrong" popover on Submit
+  // (adds category/comment) — the backend just appends each as its own log line.
+  const sendFeedback = (
+    msgId: number,
+    question: string,
+    answer: string,
+    rating: 'up' | 'down',
+    citations: Source[] | undefined,
+    detail?: { category?: string; comment?: string },
+  ) => {
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating } : m)))
     fetch(`${API_BASE}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, question, answer, rating }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        question,
+        answer,
+        rating,
+        category: detail?.category ?? null,
+        comment: detail?.comment ?? null,
+        citations: citations ?? [],
+      }),
     }).catch((err) => console.error('feedback failed', err))
   }
 
@@ -795,40 +814,6 @@ export function Tool() {
             dragOver ? 'border-accent bg-accent/5' : 'border-border'
           }`}
         >
-          {/* Notify bar — slim, top of panel, dismissible. The wrapper is always
-              mounted and animates height via a grid-rows transition so the panel
-              below doesn't jump when the bar appears or is dismissed. */}
-          <div
-            className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out ${
-              notifyPromptVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-            }`}
-          >
-            <div className="min-h-0">
-              <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-5 py-2.5">
-                <span className="text-sm text-foreground">
-                  Want to be notified when your answer is ready?
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleNotifyChoice(true)}
-                    className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
-                  >
-                    Notify me
-                  </button>
-                  <button
-                    onClick={() => setNotifyPromptVisible(false)}
-                    aria-label="Dismiss"
-                    className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                      <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Header — file context + visible clear */}
           {showHeader && (
             <div className="flex items-center justify-between border-b border-border px-5 py-3">
@@ -1006,8 +991,8 @@ export function Tool() {
                 onEdit={editMessage}
                 onAnswerGeneral={() => answerGeneral(m.id, messages[i - 1]?.text ?? '')}
                 onDeclineGeneral={() => declineGeneral(m.id)}
-                onFeedback={(rating) =>
-                  sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating)
+                onFeedback={(rating, detail) =>
+                  sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating, m.sources, detail)
                 }
               />
             ))}
@@ -1036,6 +1021,40 @@ export function Tool() {
 
           {/* Composer */}
           <div className="border-t border-border p-4">
+            {/* Notify bar — sits directly above the composer (Claude-style), same
+                width as it. The wrapper is always mounted and animates height via a
+                grid-rows transition so the composer below never jumps. */}
+            <div
+              className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out ${
+                notifyPromptVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+              }`}
+            >
+              <div className="min-h-0">
+                <div className="mb-2.5 flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3.5 py-2">
+                  <span className="text-xs text-foreground">
+                    Want to be notified when your answer is ready?
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleNotifyChoice(true)}
+                      className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
+                    >
+                      Notify me
+                    </button>
+                    <button
+                      onClick={() => setNotifyPromptVisible(false)}
+                      aria-label="Dismiss"
+                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-border bg-surface px-3 pb-2.5 pt-3 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(122,46,72,0.16)]">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
@@ -1546,7 +1565,11 @@ function CruxMarkdown({ text, streaming }: { text: string; streaming?: boolean }
           rehypePlugins={REHYPE_PLUGINS}
           components={MD_COMPONENTS}
         >
-          {sanitizeMd(prior)}
+          {/* remend closes any bold/italic/code/table marker whose match hasn't
+              streamed in yet, so a dangling ** doesn't swallow everything after
+              it (headings, tables, code fences) as raw text until it flickers
+              into place once the closing marker finally arrives */}
+          {remend(sanitizeMd(prior))}
         </ReactMarkdown>
       )}
       <p className="mb-2 whitespace-pre-wrap last:mb-0">
@@ -1572,21 +1595,62 @@ const MessageBubble = memo(function MessageBubble({
   onEdit?: (text: string) => void
   onAnswerGeneral?: () => void
   onDeclineGeneral?: () => void
-  onFeedback?: (rating: 'up' | 'down') => void
+  onFeedback?: (rating: 'up' | 'down', detail?: { category?: string; comment?: string }) => void
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   // Which source chip's passage popover is open, if any. Click-to-toggle so it
   // works on touch and keyboard, not just mouse hover.
   const [openSourceIdx, setOpenSourceIdx] = useState<number | null>(null)
+  // "What went wrong?" popover for a down-vote, plus its optional detail fields.
+  const [downOpen, setDownOpen] = useState(false)
+  const [category, setCategory] = useState('')
+  const [comment, setComment] = useState('')
+  const [thanksVisible, setThanksVisible] = useState(false)
+  const downTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const thanksTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (openSourceIdx === null) return
+    if (openSourceIdx === null && !downOpen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenSourceIdx(null)
+      if (e.key === 'Escape') {
+        setOpenSourceIdx(null)
+        setDownOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openSourceIdx])
+  }, [openSourceIdx, downOpen])
+  useEffect(() => {
+    if (downOpen) downTextareaRef.current?.focus()
+  }, [downOpen])
+  useEffect(() => () => {
+    if (thanksTimer.current) clearTimeout(thanksTimer.current)
+  }, [])
+
+  // Up: switch/record and show a brief "Thanks", no popover. Down: switch/record
+  // and open the detail popover. Re-clicking the already-active thumb is a no-op.
+  const handleUp = () => {
+    if (message.rating === 'up') return
+    setDownOpen(false)
+    onFeedback?.('up')
+    setThanksVisible(true)
+    if (thanksTimer.current) clearTimeout(thanksTimer.current)
+    thanksTimer.current = setTimeout(() => setThanksVisible(false), 1800)
+  }
+  const handleDown = () => {
+    if (message.rating === 'down') return
+    setThanksVisible(false)
+    onFeedback?.('down')
+    setCategory('')
+    setComment('')
+    setDownOpen(true)
+  }
+  const submitDetail = () => {
+    onFeedback?.('down', { category: category || undefined, comment: comment || undefined })
+    setDownOpen(false)
+  }
+  const cancelDetail = () => setDownOpen(false)
+
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // clear the "Copied" reset timer if the bubble unmounts first (e.g. Clear session)
@@ -1690,7 +1754,6 @@ const MessageBubble = memo(function MessageBubble({
                 <button
                   type="button"
                   onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
-                  onMouseEnter={() => setOpenSourceIdx(i)}
                   aria-expanded={openSourceIdx === i}
                   title="See the exact passage"
                   className="fade-in inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1701,11 +1764,12 @@ const MessageBubble = memo(function MessageBubble({
                   {s.page ? `${s.file} · Page ${s.page}` : s.file}
                 </button>
 
-                {/* popover anchored to this chip — never pushes later messages down */}
+                {/* click-to-toggle popover, solid so it never shows the answer text
+                    through it; opens below the chip so it doesn't cover the answer above */}
                 {openSourceIdx === i && s.snippet && (
                   <>
-                    <div className="fixed inset-0 z-10" onClick={() => setOpenSourceIdx(null)} />
-                    <div className="fade-in absolute bottom-full left-0 z-20 mb-2 w-72 max-w-[80vw] rounded-lg border border-teal/30 bg-teal/5 px-3.5 py-2.5 shadow-lg">
+                    <div className="fixed inset-0 z-40" onClick={() => setOpenSourceIdx(null)} />
+                    <div className="fade-in absolute top-full left-0 z-50 mt-2 w-72 max-w-md max-h-64 overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
                       <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
                         Source passage
                       </p>
@@ -1739,39 +1803,88 @@ const MessageBubble = memo(function MessageBubble({
           )}
 
           {onFeedback && (
-            <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
-              <button
-                type="button"
-                onClick={() => onFeedback('up')}
-                disabled={!!message.rating}
-                aria-label="Good answer"
-                aria-pressed={message.rating === 'up'}
-                className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                  message.rating === 'up'
-                    ? 'text-accent'
-                    : 'text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground'
-                }`}
-              >
-                <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'up' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
-                  <path d="M7 22V11M2 13v7a2 2 0 0 0 2 2h12.5a2 2 0 0 0 1.98-1.7l1.2-8A2 2 0 0 0 17.7 10H14V5a2 2 0 0 0-2-2l-3 7v10" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => onFeedback('down')}
-                disabled={!!message.rating}
-                aria-label="Bad answer"
-                aria-pressed={message.rating === 'down'}
-                className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                  message.rating === 'down'
-                    ? 'text-warn'
-                    : 'text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground'
-                }`}
-              >
-                <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'down' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
-                  <path d="M17 2v11M22 11V4a2 2 0 0 0-2-2H7.5a2 2 0 0 0-1.98 1.7l-1.2 8A2 2 0 0 0 6.3 14H10v5a2 2 0 0 0 2 2l3-7V2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+            <div className="flex items-center gap-1 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={handleUp}
+                  aria-label="Good answer"
+                  aria-pressed={message.rating === 'up'}
+                  className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                    message.rating === 'up' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'up' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
+                    <path d="M7 22V11M2 13v7a2 2 0 0 0 2 2h12.5a2 2 0 0 0 1.98-1.7l1.2-8A2 2 0 0 0 17.7 10H14V5a2 2 0 0 0-2-2l-3 7v10" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={handleDown}
+                    aria-label="Bad answer"
+                    aria-pressed={message.rating === 'down'}
+                    className={`flex items-center rounded-md p-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                      message.rating === 'down' ? 'text-warn' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill={message.rating === 'down' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6">
+                      <path d="M17 2v11M22 11V4a2 2 0 0 0-2-2H7.5a2 2 0 0 0-1.98 1.7l-1.2 8A2 2 0 0 0 6.3 14H10v5a2 2 0 0 0 2 2l3-7V2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+
+                  {/* "what went wrong" detail popover — the down-vote itself already
+                      posted on click; this only adds category/comment on Submit */}
+                  {downOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={cancelDetail} />
+                      <div className="fade-in absolute bottom-full right-0 z-50 mb-2 w-72 max-w-[85vw] rounded-xl border border-border bg-card p-3.5 shadow-lg">
+                        <p className="mb-2 text-xs font-semibold text-foreground">What went wrong?</p>
+                        <select
+                          value={category}
+                          onChange={(e) => setCategory(e.target.value)}
+                          aria-label="What went wrong"
+                          className="mb-2 w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none"
+                        >
+                          <option value="">Choose a reason (optional)</option>
+                          <option value="Wrong answer">Wrong answer</option>
+                          <option value="Wrong citation">Wrong citation</option>
+                          <option value="Too slow">Too slow</option>
+                          <option value="Formatting">Formatting</option>
+                          <option value="Other">Other</option>
+                        </select>
+                        <textarea
+                          ref={downTextareaRef}
+                          value={comment}
+                          onChange={(e) => setComment(e.target.value)}
+                          placeholder="Tell us more (optional)"
+                          aria-label="Tell us more"
+                          rows={2}
+                          className="mb-2.5 w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={cancelDetail}
+                            className="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={submitDetail}
+                            className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                          >
+                            Submit
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {thanksVisible && <span className="fade-in text-[11px] text-muted-foreground">Thanks</span>}
             </div>
           )}
 
