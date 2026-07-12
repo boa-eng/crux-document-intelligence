@@ -1055,7 +1055,25 @@ export function Tool() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-border bg-surface px-3 pb-2.5 pt-3 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(122,46,72,0.16)]">
+            {/* Liquid-glass composer. The wrapper is relative so the accent
+                aura can sit behind the frosted panel — the aura is the thing the
+                backdrop-filter refracts/saturates, since a flat cream page has
+                nothing to blur on its own. */}
+            <div className="relative">
+              {/* accent aura — one soft wine glow, reusing the brand accent so
+                  the glass tints on-brand instead of a rainbow gradient */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -inset-2 rounded-[28px] blur-2xl"
+                style={{
+                  background:
+                    'radial-gradient(70% 130% at 50% 120%, rgba(122,46,72,0.20), rgba(122,46,72,0) 65%)',
+                }}
+              />
+              {/* frosted panel: warm-white tint (from --card, never pure white),
+                  bright inset top hairline = specular highlight, accent-tinted
+                  border + wine drop shadow to lift it off the page */}
+              <div className="relative rounded-2xl border border-[rgba(122,46,72,0.16)] bg-[rgba(252,250,247,0.55)] px-3 pb-2.5 pt-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_8px_28px_rgba(122,46,72,0.12)] backdrop-blur-xl backdrop-saturate-150 transition focus-within:border-accent focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_0_0_3px_rgba(122,46,72,0.16)]">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1381,6 +1399,7 @@ export function Tool() {
                   </div>
                 </div>
               </form>
+            </div>
             </div>
 
             <p className="mt-3 text-center text-xs text-muted-foreground">
