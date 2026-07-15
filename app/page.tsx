@@ -6,6 +6,7 @@ import { Tension } from '@/components/crux/tension'
 import { Stats } from '@/components/crux/stats'
 import { Demos } from '@/components/crux/demos'
 import { Process } from '@/components/crux/process'
+import { ProofPanel } from '@/components/crux/proof-panel'
 import { WhyCrux } from '@/components/crux/why-crux'
 import { Testimonials } from '@/components/crux/testimonials'
 import { TrustStrip } from '@/components/crux/trust-strip'
@@ -25,6 +26,7 @@ export default function Page() {
         <Demos />
         <Process />
         <WhyCrux />
+        <ProofPanel />
         <Testimonials />
         <TrustStrip />
         <FinalCta />

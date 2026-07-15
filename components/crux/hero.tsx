@@ -25,7 +25,10 @@ export function Hero() {
           className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
           style={{ animationDelay: '50ms' }}
         >
-          Ask your documents anything.
+          {/* two-tone treatment: text unchanged, just split at the natural
+              phrase break so the headline gets some visual hierarchy */}
+          <span className="text-foreground">Ask your documents </span>
+          <span className="text-muted-foreground">anything.</span>
         </h1>
 
         <p
