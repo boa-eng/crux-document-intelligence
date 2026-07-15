@@ -586,9 +586,14 @@ export function Tool() {
 
     // sending always jumps to the newest message
     atBottomRef.current = true
+    // compute the id before the updater — React can invoke a state updater
+    // more than once (e.g. under StrictMode), so incrementing idSeq inside
+    // it could burn extra ids or double-count; capturing it first keeps the
+    // updater itself pure.
+    const newId = idSeq++
     setMessages((prev) => [
       ...prev,
-      { id: idSeq++, role: 'user', text, done: true, ts: Date.now() },
+      { id: newId, role: 'user', text, done: true, ts: Date.now() },
     ])
     setInput('')
 
@@ -834,6 +839,7 @@ export function Tool() {
               <div className="flex shrink-0 items-center gap-2">
                 {hasDocs && sessionId && (
                   <button
+                    type="button"
                     onClick={openGaps}
                     className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
                   >
@@ -845,6 +851,7 @@ export function Tool() {
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={clearSession}
                   className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
                 >
@@ -877,6 +884,7 @@ export function Tool() {
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="font-heading text-lg font-semibold text-foreground">Knowledge gaps</h2>
                     <button
+                      type="button"
                       onClick={() => setGapsOpen(false)}
                       aria-label="Close"
                       className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1036,12 +1044,14 @@ export function Tool() {
                   </span>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => handleNotifyChoice(true)}
                       className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
                     >
                       Notify me
                     </button>
                     <button
+                      type="button"
                       onClick={() => setNotifyPromptVisible(false)}
                       aria-label="Dismiss"
                       className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1088,6 +1098,7 @@ export function Tool() {
                       </svg>
                       <span className="truncate font-medium text-foreground">{f.name}</span>
                       <button
+                        type="button"
                         onClick={() => removeFile(f.name)}
                         aria-label={`Remove ${f.name}`}
                         className="shrink-0 text-muted-foreground transition hover:text-warn"
@@ -1728,6 +1739,7 @@ const MessageBubble = memo(function MessageBubble({
         <div className="flex items-center gap-2 opacity-0 transition focus-within:opacity-100 group-hover/user:opacity-100">
           {onEdit && (
             <button
+              type="button"
               onClick={() => onEdit(message.text)}
               aria-label="Edit and resend"
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1739,6 +1751,7 @@ const MessageBubble = memo(function MessageBubble({
             </button>
           )}
           <button
+            type="button"
             onClick={copyText}
             aria-label="Copy message"
             className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1941,6 +1954,7 @@ const MessageBubble = memo(function MessageBubble({
           )}
 
           <button
+            type="button"
             onClick={copyText}
             aria-label="Copy answer"
             className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground opacity-0 transition hover:text-foreground focus:opacity-100 group-hover:opacity-100"

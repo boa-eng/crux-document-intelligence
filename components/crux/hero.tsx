@@ -1,10 +1,12 @@
 'use client'
 
-export function Hero() {
-  const scrollToTool = () => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function scrollToTool() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
 
+export function Hero() {
   return (
     <section
       id="hero"
@@ -38,6 +40,7 @@ export function Hero() {
           style={{ animationDelay: '150ms' }}
         >
           <button
+            type="button"
             onClick={scrollToTool}
             className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
@@ -58,6 +61,7 @@ export function Hero() {
 
       {/* Scroll indicator */}
       <button
+        type="button"
         onClick={scrollToTool}
         aria-label="Scroll to the tool"
         className="absolute bottom-8 left-1/2 -translate-x-1/2 text-muted-foreground transition-colors hover:text-foreground"

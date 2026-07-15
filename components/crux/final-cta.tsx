@@ -2,12 +2,14 @@
 
 import { useReveal } from './use-reveal'
 
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function scrollToTool() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 export function FinalCta() {
   const { ref, visible } = useReveal<HTMLDivElement>()
-
-  const scrollToTool = () => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
 
   return (
     <section id="contact" className="px-6 py-28">
@@ -24,6 +26,7 @@ export function FinalCta() {
 
         <div className="mt-10 flex justify-center">
           <button
+            type="button"
             onClick={scrollToTool}
             className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >

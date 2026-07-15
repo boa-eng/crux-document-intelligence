@@ -41,16 +41,18 @@ const DEMOS: Demo[] = [
 
 const TABS = ['All', 'Legal', 'Medical', 'Finance', 'HR']
 
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function loadDemo() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 export function Demos() {
   const [active, setActive] = useState('All')
   const { ref, visible } = useReveal<HTMLDivElement>()
 
   const filtered =
     active === 'All' ? DEMOS : DEMOS.filter((d) => d.industry === active)
-
-  const loadDemo = (industry: string) => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
 
   return (
     <section className="px-6 py-24">
@@ -64,6 +66,7 @@ export function Demos() {
           {TABS.map((tab) => (
             <button
               key={tab}
+              type="button"
               onClick={() => setActive(tab)}
               className={`relative px-4 py-2 text-sm font-medium transition-colors ${
                 active === tab
@@ -120,7 +123,8 @@ export function Demos() {
                 {d.source}
               </span>
               <button
-                onClick={() => loadDemo(d.industry)}
+                type="button"
+                onClick={loadDemo}
                 className="mt-5 text-sm font-semibold text-accent transition-colors hover:text-accent-glow"
               >
                 Try a demo like this →

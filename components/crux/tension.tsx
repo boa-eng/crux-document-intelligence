@@ -17,7 +17,7 @@ export function Tension() {
         <h2 className="font-heading font-extrabold leading-[1.15] tracking-tight text-balance" style={{ fontSize: 'clamp(36px, 5vw, 56px)' }}>
           {LINES.map((line, i) => (
             <span
-              key={i}
+              key={line}
               className="block transition-all duration-700"
               style={{
                 opacity: visible ? 1 : 0,
