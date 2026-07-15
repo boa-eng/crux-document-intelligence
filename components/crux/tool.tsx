@@ -689,6 +689,23 @@ export function Tool() {
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, notCovered: false } : m)))
   }
 
+  // Regenerate — only ever offered on the last assistant answer. Drops that
+  // one answer and re-asks the same question in its place; the user's
+  // question bubble above it is untouched, so this never creates a
+  // duplicate user message.
+  const regenerate = (msgId: number, question: string) => {
+    if (isGenerating || limitReached || !question) return
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === msgId)
+      return idx === -1 ? prev : prev.slice(0, idx)
+    })
+    atBottomRef.current = true
+    const history = messages
+      .filter((m) => m.done && m.text && m.id !== msgId)
+      .map((m) => ({ role: m.role === 'crux' ? 'assistant' : 'user', content: m.text }))
+    runQuery(question, history)
+  }
+
   // Thumbs up/down on an answer. Optimistic — the UI locks in the choice
   // immediately; if the POST fails we just log it, never block reading. Ratings
   // are switchable, so this can fire twice for one down-vote: once immediately
@@ -1071,6 +1088,12 @@ export function Tool() {
                 onDeclineGeneral={() => declineGeneral(m.id)}
                 onFeedback={(rating, detail) =>
                   sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating, m.sources, detail)
+                }
+                // regenerate only ever offered on the LAST assistant message
+                onRegenerate={
+                  m.role === 'crux' && m.done && i === messages.length - 1
+                    ? () => regenerate(m.id, messages[i - 1]?.text ?? '')
+                    : undefined
                 }
               />
             ))}
@@ -1730,12 +1753,15 @@ const MessageBubble = memo(function MessageBubble({
   onAnswerGeneral,
   onDeclineGeneral,
   onFeedback,
+  onRegenerate,
 }: {
   message: Message
   onEdit?: (text: string) => void
   onAnswerGeneral?: () => void
   onDeclineGeneral?: () => void
   onFeedback?: (rating: 'up' | 'down', detail?: { category?: string; comment?: string }) => void
+  /** only ever passed for the last assistant message — re-asks its question in place */
+  onRegenerate?: () => void
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -1847,7 +1873,12 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className="group message-in flex flex-col items-start gap-2">
+      {/* aria-atomic="false" so assistive tech reads only what's newly added
+          to this streaming container, not the whole answer over again on
+          every token */}
       <div
+        aria-live="polite"
+        aria-atomic="false"
         className={`w-full text-sm leading-relaxed text-card-foreground ${
           message.flash ? 'text-flash' : ''
         }`}
@@ -2053,6 +2084,24 @@ const MessageBubble = memo(function MessageBubble({
               </>
             )}
           </button>
+
+          {/* regenerate — only ever rendered for the last assistant answer
+              (the caller only passes onRegenerate in that one case) */}
+          {onRegenerate && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              aria-label="Regenerate answer"
+              title="Regenerate answer"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground opacity-0 transition hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+            >
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M3 12a9 9 0 0 1 15.3-6.4M21 12a9 9 0 0 1-15.3 6.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M18 3v4h-4M6 21v-4h4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Retry
+            </button>
+          )}
         </div>
       )}
     </div>
