@@ -163,6 +163,68 @@ function buildGreeting(
   return { headline, tagline: TAGLINES[dom % TAGLINES.length] }
 }
 
+// Real example questions the composer's placeholder types out when the box
+// is sitting idle, so a first-time visitor sees what kind of question to ask.
+const PLACEHOLDER_QUERIES = [
+  'What was the water table depth at borehole BH-06?',
+  'What does clause 4.2 say about liability?',
+  'Summarise the notice period in this contract',
+  'Which samples failed the minimum requirement?',
+  'What standards does this report reference?',
+]
+
+/** Types the composer's placeholder through PLACEHOLDER_QUERIES, like a
+ *  typewriter, whenever the box is empty and unfocused. Writes straight to
+ *  the textarea's `placeholder` DOM attribute via a ref instead of React
+ *  state, so the animation never triggers a re-render (and can't shift any
+ *  layout) — only the invisible placeholder text changes each frame. Turns
+ *  itself off (and never starts) under prefers-reduced-motion, showing the
+ *  first query as a plain, static placeholder instead. */
+function useTypewriterPlaceholder(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  active: boolean,
+) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !active) return
+
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduceMotion) {
+      el.placeholder = PLACEHOLDER_QUERIES[0]
+      return
+    }
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const typeIn = (text: string, i: number, done: () => void) => {
+      if (cancelled) return
+      el.placeholder = text.slice(0, i)
+      if (i < text.length) timer = setTimeout(() => typeIn(text, i + 1, done), 25)
+      else timer = setTimeout(done, 1400)
+    }
+    const typeOut = (text: string, i: number, done: () => void) => {
+      if (cancelled) return
+      el.placeholder = text.slice(0, i)
+      if (i > 0) timer = setTimeout(() => typeOut(text, i - 1, done), 14)
+      else done()
+    }
+    const cycle = (qi: number) => {
+      if (cancelled) return
+      const text = PLACEHOLDER_QUERIES[qi % PLACEHOLDER_QUERIES.length]
+      typeIn(text, 0, () => typeOut(text, text.length, () => cycle(qi + 1)))
+    }
+    cycle(0)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [ref, active])
+}
+
 export function Tool() {
   const [files, setFiles] = useState<File[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -173,6 +235,9 @@ export function Tool() {
   // large pasted text collapses into a removable chip (like Claude), kept out
   // of the visible textarea and prepended to the message on send
   const [pasted, setPasted] = useState<string | null>(null)
+  // tracks focus so the typewriter placeholder only runs while the composer
+  // is truly idle (empty AND unfocused), not while someone's about to type
+  const [inputFocused, setInputFocused] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [orbFading, setOrbFading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -276,6 +341,11 @@ export function Tool() {
   const remaining = MAX_MESSAGES - messageCount
   const hasDocs = files.length > 0
   const limitReached = remaining <= 0
+
+  // composer is "idle" (eligible for the typewriter placeholder) only when
+  // it's both empty and not focused
+  const composerIdle = !input && !pasted && !inputFocused
+  useTypewriterPlaceholder(inputRef, composerIdle)
 
   useEffect(() => {
     // only pin to the bottom if the user hasn't scrolled up; jump instantly
@@ -1219,13 +1289,20 @@ export function Tool() {
                       setPasted((prev) => (prev ? `${prev}\n\n${clip}` : clip))
                     }
                   }}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   disabled={limitReached}
                   placeholder={
                     isRecording
                       ? 'Listening…'
-                      : hasDocs
-                        ? 'Ask anything about your document…'
-                        : 'Write a message…'
+                      : composerIdle
+                        // left empty on purpose — useTypewriterPlaceholder owns
+                        // this text while the box is idle, written straight to
+                        // the DOM so the animation never re-renders this component
+                        ? ''
+                        : hasDocs
+                          ? 'Ask anything about your document…'
+                          : 'Write a message…'
                   }
                   className="max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
                 />
@@ -1400,7 +1477,7 @@ export function Tool() {
                         type="submit"
                         disabled={limitReached || (!input.trim() && !pasted)}
                         aria-label="Send"
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:bg-accent/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:scale-105 enabled:hover:brightness-110 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                       >
                         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
