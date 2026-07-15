@@ -23,15 +23,14 @@ export function Hero() {
           className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
           style={{ animationDelay: '50ms' }}
         >
-          Ask your documents anything. Every answer comes with proof.
+          Ask your documents anything.
         </h1>
 
         <p
           className="fade-up mt-6 text-lg font-medium text-muted-foreground md:text-xl"
           style={{ animationDelay: '100ms' }}
         >
-          Crux reads every report, standard, and record your firm has ever produced, and
-          answers with the source.
+          Every answer comes with the source.
         </p>
 
         <div
@@ -53,14 +52,7 @@ export function Hero() {
           className="fade-up mt-4 text-sm text-muted-foreground"
           style={{ animationDelay: '175ms' }}
         >
-          And when your documents don&apos;t have the answer, Crux says so.
-        </p>
-
-        <p
-          className="fade-up mt-4 max-w-md text-sm leading-relaxed text-muted-foreground"
-          style={{ animationDelay: '200ms' }}
-        >
-          No account. Nothing stored. Your files leave when you do.
+          No account. Nothing stored.
         </p>
       </div>
 

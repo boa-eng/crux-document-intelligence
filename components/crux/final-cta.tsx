@@ -19,9 +19,7 @@ export function FinalCta() {
           Don&apos;t take our word for it.
         </h2>
         <p className="mt-5 text-lg font-medium leading-relaxed text-muted-foreground">
-          Bring the document you actually work with. Ask the question that
-          usually costs you twenty minutes of scrolling. Read the answer, then
-          click the citation to see the exact page it came from.
+          Bring your hardest document. Ask your hardest question.
         </p>
 
         <div className="mt-10 flex justify-center">

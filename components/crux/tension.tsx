@@ -4,7 +4,7 @@ import { useReveal } from './use-reveal'
 
 const LINES = [
   'The answer is in there.',
-  'Buried in there, somewhere.',
+  'Buried somewhere.',
   'You don’t have time to look.',
 ]
 
@@ -36,7 +36,7 @@ export function Tension() {
             transitionDelay: `${LINES.length * 200}ms`,
           }}
         >
-          So Crux reads it for you. And shows you exactly where.
+          Crux finds it. And shows you where.
         </p>
       </div>
     </section>
