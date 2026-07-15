@@ -1821,7 +1821,7 @@ const MessageBubble = memo(function MessageBubble({
                   onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
                   aria-expanded={openSourceIdx === i}
                   title="See the exact passage"
-                  className="fade-in inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />

@@ -288,6 +288,26 @@
   animation: bounce-chevron 2s ease-in-out infinite;
 }
 
+/* ============================================
+   INK-STAMP CITATION REVEAL — the one signature animation. A citation chip
+   lands like a stamp being pressed onto paper: starts slightly oversized and
+   invisible, settles to full size and opacity. Used ONLY on citation chips,
+   nowhere else on the page. The 150ms delay lets the answer text finish
+   settling first, so the source "stamps down" a beat after the claim it
+   backs up. `animation-fill-mode: both` (the "both" keyword) holds the
+   pre-animation state during that delay instead of flashing full-opacity,
+   and holds the end state afterward. The site-wide prefers-reduced-motion
+   rule below already collapses every animation's duration to ~0, so this
+   one is covered without a second, duplicate media query.
+   ============================================ */
+@keyframes citation-stamp {
+  from { opacity: 0; transform: scale(1.05); }
+  to { opacity: 1; transform: scale(1); }
+}
+.citation-stamp {
+  animation: citation-stamp 400ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
+}
+
 .glass {
   background: rgba(251, 250, 246, 0.65);
   backdrop-filter: blur(12px);
