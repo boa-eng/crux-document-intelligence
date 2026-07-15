@@ -92,9 +92,11 @@ export function Demos() {
           {filtered.map((d) => (
             <div
               key={d.tag}
-              className="fade-in group flex flex-col rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-accent/50 hover:shadow-[0_8px_40px_-12px_var(--accent)]"
+              className="fade-in group flex flex-col rounded-2xl border border-border bg-card p-6 transition-colors duration-200 hover:border-accent/40"
             >
-              <span className="self-start rounded-full bg-accent/15 px-3 py-1 font-mono text-[11px] tracking-wide text-accent">
+              {/* category tag: a hairline label, not another accent fill — burgundy
+                  stays reserved for the primary CTA and active states */}
+              <span className="self-start rounded-full border border-border px-3 py-1 font-mono text-[11px] tracking-wide text-muted-foreground">
                 {d.tag}
               </span>
               <p className="mt-4 text-xs text-muted-foreground">
