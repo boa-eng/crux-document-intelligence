@@ -1923,36 +1923,19 @@ const MessageBubble = memo(function MessageBubble({
         <div className="flex flex-wrap items-center gap-2">
           {message.sources && message.sources.length > 0 ? (
             message.sources.map((s, i) => (
-              <div key={`${s.file}-${s.page}`} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
-                  aria-expanded={openSourceIdx === i}
-                  title="See the exact passage"
-                  className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  {s.page ? `${s.file} · Page ${s.page}` : s.file}
-                </button>
-
-                {/* click-to-toggle popover, solid so it never shows the answer text
-                    through it; opens below the chip so it doesn't cover the answer above */}
-                {openSourceIdx === i && s.snippet && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setOpenSourceIdx(null)} />
-                    <div className="fade-in absolute top-full left-0 z-50 mt-2 w-72 max-w-md max-h-64 overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
-                      <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-                        Source passage
-                      </p>
-                      <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-                        {s.snippet}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
+              <button
+                key={`${s.file}-${s.page}`}
+                type="button"
+                onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
+                aria-expanded={openSourceIdx === i}
+                title="See the exact passage"
+                className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {s.page ? `${s.file} · Page ${s.page}` : s.file}
+              </button>
             ))
           ) : (
             message.grounded === false && (
@@ -2102,6 +2085,19 @@ const MessageBubble = memo(function MessageBubble({
               Retry
             </button>
           )}
+        </div>
+      )}
+
+      {/* expanded source passage — inline block below the chip row so it pushes
+          later content down instead of overlaying it (was an absolute popover) */}
+      {message.done && openSourceIdx !== null && message.sources?.[openSourceIdx]?.snippet && (
+        <div className="fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
+          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+            Source passage
+          </p>
+          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {message.sources[openSourceIdx].snippet}
+          </p>
         </div>
       )}
     </div>
