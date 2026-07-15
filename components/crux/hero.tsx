@@ -10,7 +10,7 @@ export function Hero() {
   return (
     <section
       id="hero"
-      className="relative flex min-h-[100svh] flex-col items-center justify-center px-6 py-24 text-center"
+      className="relative flex min-h-[88svh] flex-col items-center justify-center px-6 py-24 text-center"
     >
       {/* Content */}
       <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center">
