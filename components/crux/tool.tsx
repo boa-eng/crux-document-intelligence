@@ -1063,7 +1063,7 @@ export function Tool() {
                       value={nameDraft}
                       onChange={(e) => setNameDraft(e.target.value)}
                       placeholder="What should I call you? (optional)"
-                      className="w-48 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
+                      className="w-56 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
                     />
                   </form>
                 )}
