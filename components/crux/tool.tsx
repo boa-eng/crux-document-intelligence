@@ -12,13 +12,6 @@ import { ThinkingSkeleton } from './thinking-skeleton'
 const MAX_MESSAGES = 15
 const MAX_FILES = 10
 
-// Answer-depth choices, shown in the composer as a Claude-style dropdown.
-// The value is what the backend expects ("effort"); label + blurb are UI only.
-const DEPTHS = [
-  { val: 'low', label: 'Low', desc: 'Fast answer, less digging' },
-  { val: 'medium', label: 'Medium', desc: 'Balanced depth and speed' },
-  { val: 'high', label: 'High', desc: 'Thorough, digs deeper' },
-] as const
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 // Convert a recorded clip (webm/opus from MediaRecorder) into a WAV blob right
@@ -242,8 +235,6 @@ export function Tool() {
   const [orbFading, setOrbFading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [fileLimitWarn, setFileLimitWarn] = useState(false)
-  // answer depth, client-chosen (like Claude's model picker)
-  const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   // optional name, session-only — used naturally in replies, asked once on first load
   const [name, setName] = useState('')
   const [nameDone, setNameDone] = useState(false)
@@ -269,7 +260,6 @@ export function Tool() {
   const audioInputRef = useRef<HTMLInputElement>(null)
   // Claude/GPT-style "+" attach menu open/closed
   const [attachOpen, setAttachOpen] = useState(false)
-  const [depthOpen, setDepthOpen] = useState(false)
 
   // "Knowledge gaps" panel — what the uploaded documents keep failing to answer.
   // Only meaningful once a document session exists; the backend itself decides
@@ -324,17 +314,16 @@ export function Tool() {
 
   // Escape closes whichever composer popover menu (or the gaps modal) is open.
   useEffect(() => {
-    if (!attachOpen && !depthOpen && !gapsOpen) return
+    if (!attachOpen && !gapsOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setAttachOpen(false)
-        setDepthOpen(false)
         setGapsOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [attachOpen, depthOpen, gapsOpen])
+  }, [attachOpen, gapsOpen])
 
   // single source of truth: the rate-limit counter is just the user turns so far
   const messageCount = messages.filter((m) => m.role === 'user').length
@@ -529,7 +518,7 @@ export function Tool() {
       fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: question, history, effort, name: name || undefined, general_only: generalOnly }),
+        body: JSON.stringify({ session_id: sessionId, message: question, history, name: name || undefined, general_only: generalOnly }),
         signal: controller.signal,
       })
 
@@ -1024,7 +1013,7 @@ export function Tool() {
             className="max-h-[600px] min-h-[320px] space-y-4 overflow-y-auto p-5"
           >
             {messages.length === 0 && !isGenerating && (
-              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-4 text-center">
+              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2.5 text-center">
                 {/* Product first, name-ask second: nothing here blocks a first-time
                     visitor from immediately seeing what Crux does. */}
                 {greetingData.headline && (
@@ -1058,7 +1047,9 @@ export function Tool() {
                   </>
                 )}
 
-                {/* small, optional, non-blocking — never had to be answered to use Crux */}
+                {/* small, optional, non-blocking — never had to be answered to use Crux.
+                    Kept visually quiet (smaller, softer border) so it reads as a minor
+                    aside, not a competitor to the "drop a document" line above it. */}
                 {!nameDone && (
                   <form
                     onSubmit={(e) => {
@@ -1066,13 +1057,13 @@ export function Tool() {
                       setName(nameDraft.trim())
                       setNameDone(true)
                     }}
-                    className="mt-1"
+                    className="mt-2"
                   >
                     <input
                       value={nameDraft}
                       onChange={(e) => setNameDraft(e.target.value)}
                       placeholder="What should I call you? (optional)"
-                      className="w-56 rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none"
+                      className="w-48 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
                     />
                   </form>
                 )}
@@ -1158,25 +1149,12 @@ export function Tool() {
               </div>
             </div>
 
-            {/* Liquid-glass composer. The wrapper is relative so the accent
-                aura can sit behind the frosted panel — the aura is the thing the
-                backdrop-filter refracts/saturates, since a flat cream page has
-                nothing to blur on its own. */}
+            {/* Composer wrapper. Was "liquid glass" (blur/inset-shine/coloured
+                glow) — dropped because those effects were nearly invisible on
+                the light paper background and just added complexity. Now a
+                plain solid card that still shows a clear focus state. */}
             <div className="relative">
-              {/* accent aura — one soft wine glow, reusing the brand accent so
-                  the glass tints on-brand instead of a rainbow gradient */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -inset-2 rounded-[28px] blur-2xl"
-                style={{
-                  background:
-                    'radial-gradient(70% 130% at 50% 120%, rgba(122,46,72,0.20), rgba(122,46,72,0) 65%)',
-                }}
-              />
-              {/* frosted panel: warm-white tint (from --card, never pure white),
-                  bright inset top hairline = specular highlight, accent-tinted
-                  border + wine drop shadow to lift it off the page */}
-              <div className="relative rounded-2xl border border-[rgba(122,46,72,0.16)] bg-[rgba(252,250,247,0.55)] px-3 pb-2.5 pt-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_8px_28px_rgba(122,46,72,0.12)] backdrop-blur-xl backdrop-saturate-150 transition focus-within:border-accent focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_0_0_3px_rgba(122,46,72,0.16)]">
+              <div className="relative rounded-2xl border border-border bg-card px-3 pb-2.5 pt-3 transition focus-within:border-accent">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1330,7 +1308,7 @@ export function Tool() {
                   className="max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
                 />
 
-                {/* controls row: [+] on the left, effort · mic · send on the right */}
+                {/* controls row: [+] on the left, mic · send on the right */}
                 <div className="flex items-center justify-between gap-2">
                   {/* "+" attach button with a Claude-style pop-up menu */}
                   <div className="relative shrink-0">
@@ -1387,73 +1365,8 @@ export function Tool() {
                     )}
                   </div>
 
-                  {/* effort · mic · send */}
+                  {/* mic · send */}
                   <div className="flex items-center gap-2">
-                    {/* effort — answer-depth dropdown, Claude model-picker style */}
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setDepthOpen((o) => !o)}
-                        aria-haspopup="true"
-                        aria-expanded={depthOpen}
-                        aria-label="Answer depth"
-                        title="Answer depth"
-                        className="flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                      >
-                        {DEPTHS.find((d) => d.val === effort)?.label}
-                        <svg
-                          className={`h-3.5 w-3.5 transition-transform ${depthOpen ? 'rotate-180' : ''}`}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                        >
-                          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-
-                      {depthOpen && (
-                        <>
-                          {/* click-away layer */}
-                          <div className="fixed inset-0 z-10" onClick={() => setDepthOpen(false)} />
-                          {/* menu opens upward and right-aligned so it stays on-screen */}
-                          <div
-                            role="radiogroup"
-                            aria-label="Answer depth"
-                            className="fade-in absolute bottom-full right-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl"
-                          >
-                            {DEPTHS.map((d) => (
-                              <button
-                                key={d.val}
-                                type="button"
-                                role="radio"
-                                aria-checked={effort === d.val}
-                                onClick={() => {
-                                  setEffort(d.val)
-                                  setDepthOpen(false)
-                                }}
-                                className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2 text-left transition hover:bg-muted"
-                              >
-                                <svg
-                                  className={`mt-0.5 h-4 w-4 shrink-0 text-accent transition-opacity ${effort === d.val ? 'opacity-100' : 'opacity-0'}`}
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.2"
-                                >
-                                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                                <span>
-                                  <span className="block text-sm font-medium text-foreground">{d.label}</span>
-                                  <span className="block text-xs text-muted-foreground">{d.desc}</span>
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-
                     {/* mic — record voice, transcribe into the box */}
                     {isRecording && (
                       <span className="text-[11px] font-medium tabular-nums text-warn">
@@ -2095,7 +2008,7 @@ const MessageBubble = memo(function MessageBubble({
           <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
             Source passage
           </p>
-          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
             {message.sources[openSourceIdx].snippet}
           </p>
         </div>
