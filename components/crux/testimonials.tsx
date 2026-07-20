@@ -32,9 +32,11 @@ export function Testimonials() {
           {ITEMS.map((t) => (
             <figure
               key={t.author}
-              className="flex flex-col rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-accent/50 hover:shadow-[0_8px_40px_-12px_var(--accent)]"
+              className="flex flex-col rounded-2xl border border-border bg-card p-6 transition-colors duration-200 hover:border-accent/40"
             >
-              <div className="flex gap-0.5 text-accent" aria-label="5 out of 5 stars">
+              {/* rating stars: a muted signal, not another accent surface —
+                  burgundy stays reserved for the primary CTA and active states */}
+              <div className="flex gap-0.5 text-muted-foreground" aria-label="5 out of 5 stars">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <svg key={i} className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="m12 2 2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 8.9l6.9-.6z" />

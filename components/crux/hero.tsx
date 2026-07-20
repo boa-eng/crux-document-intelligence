@@ -1,14 +1,16 @@
 'use client'
 
-export function Hero() {
-  const scrollToTool = () => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function scrollToTool() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
 
+export function Hero() {
   return (
     <section
       id="hero"
-      className="relative flex min-h-[100svh] flex-col items-center justify-center px-6 py-24 text-center"
+      className="relative flex min-h-[75svh] flex-col items-center justify-center px-6 py-24 text-center"
     >
       {/* Content */}
       <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center">
@@ -23,15 +25,17 @@ export function Hero() {
           className="fade-up mt-4 font-heading text-[44px] font-semibold leading-[1.05] tracking-tight text-balance md:text-7xl"
           style={{ animationDelay: '50ms' }}
         >
-          Ask your documents anything. Every answer comes with proof.
+          {/* two-tone treatment: text unchanged, just split at the natural
+              phrase break so the headline gets some visual hierarchy */}
+          <span className="text-foreground">Ask your documents </span>
+          <span className="text-muted-foreground">anything.</span>
         </h1>
 
         <p
           className="fade-up mt-6 text-lg font-medium text-muted-foreground md:text-xl"
           style={{ animationDelay: '100ms' }}
         >
-          Crux reads every report, standard, and record your firm has ever produced, and
-          answers with the source.
+          Every answer comes with the source.
         </p>
 
         <div
@@ -39,8 +43,9 @@ export function Hero() {
           style={{ animationDelay: '150ms' }}
         >
           <button
+            type="button"
             onClick={scrollToTool}
-            className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground shadow-[0_8px_24px_-8px_rgba(122,46,72,0.6)] transition-all duration-200 hover:scale-[1.02] hover:shadow-[0_10px_30px_-6px_rgba(122,46,72,0.7)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="group relative inline-flex items-center gap-2 rounded-lg bg-accent px-7 py-3.5 text-sm font-semibold text-accent-foreground transition-all duration-200 hover:scale-[1.02] hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Ask your first question
             <span className="transition-transform duration-200 group-hover:translate-x-0.5">
@@ -53,19 +58,13 @@ export function Hero() {
           className="fade-up mt-4 text-sm text-muted-foreground"
           style={{ animationDelay: '175ms' }}
         >
-          And when your documents don&apos;t have the answer, Crux says so.
-        </p>
-
-        <p
-          className="fade-up mt-4 max-w-md text-sm leading-relaxed text-muted-foreground"
-          style={{ animationDelay: '200ms' }}
-        >
-          No account. Nothing stored. Your files leave when you do.
+          No account. Nothing stored.
         </p>
       </div>
 
       {/* Scroll indicator */}
       <button
+        type="button"
         onClick={scrollToTool}
         aria-label="Scroll to the tool"
         className="absolute bottom-8 left-1/2 -translate-x-1/2 text-muted-foreground transition-colors hover:text-foreground"

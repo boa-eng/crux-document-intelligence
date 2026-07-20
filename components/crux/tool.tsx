@@ -12,13 +12,6 @@ import { ThinkingSkeleton } from './thinking-skeleton'
 const MAX_MESSAGES = 15
 const MAX_FILES = 10
 
-// Answer-depth choices, shown in the composer as a Claude-style dropdown.
-// The value is what the backend expects ("effort"); label + blurb are UI only.
-const DEPTHS = [
-  { val: 'low', label: 'Low', desc: 'Fast answer, less digging' },
-  { val: 'medium', label: 'Medium', desc: 'Balanced depth and speed' },
-  { val: 'high', label: 'High', desc: 'Thorough, digs deeper' },
-] as const
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 // Convert a recorded clip (webm/opus from MediaRecorder) into a WAV blob right
@@ -163,6 +156,68 @@ function buildGreeting(
   return { headline, tagline: TAGLINES[dom % TAGLINES.length] }
 }
 
+// Real example questions the composer's placeholder types out when the box
+// is sitting idle, so a first-time visitor sees what kind of question to ask.
+const PLACEHOLDER_QUERIES = [
+  'What was the water table depth at borehole BH-06?',
+  'What does clause 4.2 say about liability?',
+  'Summarise the notice period in this contract',
+  'Which samples failed the minimum requirement?',
+  'What standards does this report reference?',
+]
+
+/** Types the composer's placeholder through PLACEHOLDER_QUERIES, like a
+ *  typewriter, whenever the box is empty and unfocused. Writes straight to
+ *  the textarea's `placeholder` DOM attribute via a ref instead of React
+ *  state, so the animation never triggers a re-render (and can't shift any
+ *  layout) — only the invisible placeholder text changes each frame. Turns
+ *  itself off (and never starts) under prefers-reduced-motion, showing the
+ *  first query as a plain, static placeholder instead. */
+function useTypewriterPlaceholder(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  active: boolean,
+) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !active) return
+
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduceMotion) {
+      el.placeholder = PLACEHOLDER_QUERIES[0]
+      return
+    }
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const typeIn = (text: string, i: number, done: () => void) => {
+      if (cancelled) return
+      el.placeholder = text.slice(0, i)
+      if (i < text.length) timer = setTimeout(() => typeIn(text, i + 1, done), 25)
+      else timer = setTimeout(done, 1400)
+    }
+    const typeOut = (text: string, i: number, done: () => void) => {
+      if (cancelled) return
+      el.placeholder = text.slice(0, i)
+      if (i > 0) timer = setTimeout(() => typeOut(text, i - 1, done), 14)
+      else done()
+    }
+    const cycle = (qi: number) => {
+      if (cancelled) return
+      const text = PLACEHOLDER_QUERIES[qi % PLACEHOLDER_QUERIES.length]
+      typeIn(text, 0, () => typeOut(text, text.length, () => cycle(qi + 1)))
+    }
+    cycle(0)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [ref, active])
+}
+
 export function Tool() {
   const [files, setFiles] = useState<File[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -173,12 +228,13 @@ export function Tool() {
   // large pasted text collapses into a removable chip (like Claude), kept out
   // of the visible textarea and prepended to the message on send
   const [pasted, setPasted] = useState<string | null>(null)
+  // tracks focus so the typewriter placeholder only runs while the composer
+  // is truly idle (empty AND unfocused), not while someone's about to type
+  const [inputFocused, setInputFocused] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [orbFading, setOrbFading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [fileLimitWarn, setFileLimitWarn] = useState(false)
-  // answer depth, client-chosen (like Claude's model picker)
-  const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   // optional name, session-only — used naturally in replies, asked once on first load
   const [name, setName] = useState('')
   const [nameDone, setNameDone] = useState(false)
@@ -204,7 +260,6 @@ export function Tool() {
   const audioInputRef = useRef<HTMLInputElement>(null)
   // Claude/GPT-style "+" attach menu open/closed
   const [attachOpen, setAttachOpen] = useState(false)
-  const [depthOpen, setDepthOpen] = useState(false)
 
   // "Knowledge gaps" panel — what the uploaded documents keep failing to answer.
   // Only meaningful once a document session exists; the backend itself decides
@@ -259,23 +314,27 @@ export function Tool() {
 
   // Escape closes whichever composer popover menu (or the gaps modal) is open.
   useEffect(() => {
-    if (!attachOpen && !depthOpen && !gapsOpen) return
+    if (!attachOpen && !gapsOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setAttachOpen(false)
-        setDepthOpen(false)
         setGapsOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [attachOpen, depthOpen, gapsOpen])
+  }, [attachOpen, gapsOpen])
 
   // single source of truth: the rate-limit counter is just the user turns so far
   const messageCount = messages.filter((m) => m.role === 'user').length
   const remaining = MAX_MESSAGES - messageCount
   const hasDocs = files.length > 0
   const limitReached = remaining <= 0
+
+  // composer is "idle" (eligible for the typewriter placeholder) only when
+  // it's both empty and not focused
+  const composerIdle = !input && !pasted && !inputFocused
+  useTypewriterPlaceholder(inputRef, composerIdle)
 
   useEffect(() => {
     // only pin to the bottom if the user hasn't scrolled up; jump instantly
@@ -459,7 +518,7 @@ export function Tool() {
       fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: question, history, effort, name: name || undefined, general_only: generalOnly }),
+        body: JSON.stringify({ session_id: sessionId, message: question, history, name: name || undefined, general_only: generalOnly }),
         signal: controller.signal,
       })
 
@@ -586,9 +645,14 @@ export function Tool() {
 
     // sending always jumps to the newest message
     atBottomRef.current = true
+    // compute the id before the updater — React can invoke a state updater
+    // more than once (e.g. under StrictMode), so incrementing idSeq inside
+    // it could burn extra ids or double-count; capturing it first keeps the
+    // updater itself pure.
+    const newId = idSeq++
     setMessages((prev) => [
       ...prev,
-      { id: idSeq++, role: 'user', text, done: true, ts: Date.now() },
+      { id: newId, role: 'user', text, done: true, ts: Date.now() },
     ])
     setInput('')
 
@@ -612,6 +676,23 @@ export function Tool() {
   // User said "no" — just dismiss the prompt, no request needed.
   const declineGeneral = (msgId: number) => {
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, notCovered: false } : m)))
+  }
+
+  // Regenerate — only ever offered on the last assistant answer. Drops that
+  // one answer and re-asks the same question in its place; the user's
+  // question bubble above it is untouched, so this never creates a
+  // duplicate user message.
+  const regenerate = (msgId: number, question: string) => {
+    if (isGenerating || limitReached || !question) return
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === msgId)
+      return idx === -1 ? prev : prev.slice(0, idx)
+    })
+    atBottomRef.current = true
+    const history = messages
+      .filter((m) => m.done && m.text && m.id !== msgId)
+      .map((m) => ({ role: m.role === 'crux' ? 'assistant' : 'user', content: m.text }))
+    runQuery(question, history)
   }
 
   // Thumbs up/down on an answer. Optimistic — the UI locks in the choice
@@ -834,6 +915,7 @@ export function Tool() {
               <div className="flex shrink-0 items-center gap-2">
                 {hasDocs && sessionId && (
                   <button
+                    type="button"
                     onClick={openGaps}
                     className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
                   >
@@ -845,6 +927,7 @@ export function Tool() {
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={clearSession}
                   className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
                 >
@@ -877,6 +960,7 @@ export function Tool() {
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="font-heading text-lg font-semibold text-foreground">Knowledge gaps</h2>
                     <button
+                      type="button"
                       onClick={() => setGapsOpen(false)}
                       aria-label="Close"
                       className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -929,7 +1013,7 @@ export function Tool() {
             className="max-h-[600px] min-h-[320px] space-y-4 overflow-y-auto p-5"
           >
             {messages.length === 0 && !isGenerating && (
-              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-4 text-center">
+              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2.5 text-center">
                 {/* Product first, name-ask second: nothing here blocks a first-time
                     visitor from immediately seeing what Crux does. */}
                 {greetingData.headline && (
@@ -963,7 +1047,9 @@ export function Tool() {
                   </>
                 )}
 
-                {/* small, optional, non-blocking — never had to be answered to use Crux */}
+                {/* small, optional, non-blocking — never had to be answered to use Crux.
+                    Kept visually quiet (smaller, softer border) so it reads as a minor
+                    aside, not a competitor to the "drop a document" line above it. */}
                 {!nameDone && (
                   <form
                     onSubmit={(e) => {
@@ -971,13 +1057,13 @@ export function Tool() {
                       setName(nameDraft.trim())
                       setNameDone(true)
                     }}
-                    className="mt-1"
+                    className="mt-2"
                   >
                     <input
                       value={nameDraft}
                       onChange={(e) => setNameDraft(e.target.value)}
                       placeholder="What should I call you? (optional)"
-                      className="w-56 rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none"
+                      className="w-56 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
                     />
                   </form>
                 )}
@@ -993,6 +1079,12 @@ export function Tool() {
                 onDeclineGeneral={() => declineGeneral(m.id)}
                 onFeedback={(rating, detail) =>
                   sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating, m.sources, detail)
+                }
+                // regenerate only ever offered on the LAST assistant message
+                onRegenerate={
+                  m.role === 'crux' && m.done && i === messages.length - 1
+                    ? () => regenerate(m.id, messages[i - 1]?.text ?? '')
+                    : undefined
                 }
               />
             ))}
@@ -1036,12 +1128,14 @@ export function Tool() {
                   </span>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => handleNotifyChoice(true)}
                       className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
                     >
                       Notify me
                     </button>
                     <button
+                      type="button"
                       onClick={() => setNotifyPromptVisible(false)}
                       aria-label="Dismiss"
                       className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1055,7 +1149,12 @@ export function Tool() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-border bg-surface px-3 pb-2.5 pt-3 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(122,46,72,0.16)]">
+            {/* Composer wrapper. Was "liquid glass" (blur/inset-shine/coloured
+                glow) — dropped because those effects were nearly invisible on
+                the light paper background and just added complexity. Now a
+                plain solid card that still shows a clear focus state. */}
+            <div className="relative">
+              <div className="relative rounded-2xl border border-border bg-card px-3 pb-2.5 pt-3 transition focus-within:border-accent">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1070,6 +1169,7 @@ export function Tool() {
                       </svg>
                       <span className="truncate font-medium text-foreground">{f.name}</span>
                       <button
+                        type="button"
                         onClick={() => removeFile(f.name)}
                         aria-label={`Remove ${f.name}`}
                         className="shrink-0 text-muted-foreground transition hover:text-warn"
@@ -1190,18 +1290,25 @@ export function Tool() {
                       setPasted((prev) => (prev ? `${prev}\n\n${clip}` : clip))
                     }
                   }}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   disabled={limitReached}
                   placeholder={
                     isRecording
                       ? 'Listening…'
-                      : hasDocs
-                        ? 'Ask anything about your document…'
-                        : 'Write a message…'
+                      : composerIdle
+                        // left empty on purpose — useTypewriterPlaceholder owns
+                        // this text while the box is idle, written straight to
+                        // the DOM so the animation never re-renders this component
+                        ? ''
+                        : hasDocs
+                          ? 'Ask anything about your document…'
+                          : 'Write a message…'
                   }
                   className="max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
                 />
 
-                {/* controls row: [+] on the left, effort · mic · send on the right */}
+                {/* controls row: [+] on the left, mic · send on the right */}
                 <div className="flex items-center justify-between gap-2">
                   {/* "+" attach button with a Claude-style pop-up menu */}
                   <div className="relative shrink-0">
@@ -1258,73 +1365,8 @@ export function Tool() {
                     )}
                   </div>
 
-                  {/* effort · mic · send */}
+                  {/* mic · send */}
                   <div className="flex items-center gap-2">
-                    {/* effort — answer-depth dropdown, Claude model-picker style */}
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setDepthOpen((o) => !o)}
-                        aria-haspopup="true"
-                        aria-expanded={depthOpen}
-                        aria-label="Answer depth"
-                        title="Answer depth"
-                        className="flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                      >
-                        {DEPTHS.find((d) => d.val === effort)?.label}
-                        <svg
-                          className={`h-3.5 w-3.5 transition-transform ${depthOpen ? 'rotate-180' : ''}`}
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                        >
-                          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-
-                      {depthOpen && (
-                        <>
-                          {/* click-away layer */}
-                          <div className="fixed inset-0 z-10" onClick={() => setDepthOpen(false)} />
-                          {/* menu opens upward and right-aligned so it stays on-screen */}
-                          <div
-                            role="radiogroup"
-                            aria-label="Answer depth"
-                            className="fade-in absolute bottom-full right-0 z-20 mb-2 w-56 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-xl"
-                          >
-                            {DEPTHS.map((d) => (
-                              <button
-                                key={d.val}
-                                type="button"
-                                role="radio"
-                                aria-checked={effort === d.val}
-                                onClick={() => {
-                                  setEffort(d.val)
-                                  setDepthOpen(false)
-                                }}
-                                className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2 text-left transition hover:bg-muted"
-                              >
-                                <svg
-                                  className={`mt-0.5 h-4 w-4 shrink-0 text-accent transition-opacity ${effort === d.val ? 'opacity-100' : 'opacity-0'}`}
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.2"
-                                >
-                                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                                <span>
-                                  <span className="block text-sm font-medium text-foreground">{d.label}</span>
-                                  <span className="block text-xs text-muted-foreground">{d.desc}</span>
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-
                     {/* mic — record voice, transcribe into the box */}
                     {isRecording && (
                       <span className="text-[11px] font-medium tabular-nums text-warn">
@@ -1371,7 +1413,7 @@ export function Tool() {
                         type="submit"
                         disabled={limitReached || (!input.trim() && !pasted)}
                         aria-label="Send"
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:bg-accent/90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition enabled:hover:scale-105 enabled:hover:brightness-110 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                       >
                         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
@@ -1381,6 +1423,7 @@ export function Tool() {
                   </div>
                 </div>
               </form>
+            </div>
             </div>
 
             <p className="mt-3 text-center text-xs text-muted-foreground">
@@ -1623,12 +1666,15 @@ const MessageBubble = memo(function MessageBubble({
   onAnswerGeneral,
   onDeclineGeneral,
   onFeedback,
+  onRegenerate,
 }: {
   message: Message
   onEdit?: (text: string) => void
   onAnswerGeneral?: () => void
   onDeclineGeneral?: () => void
   onFeedback?: (rating: 'up' | 'down', detail?: { category?: string; comment?: string }) => void
+  /** only ever passed for the last assistant message — re-asks its question in place */
+  onRegenerate?: () => void
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -1709,6 +1755,7 @@ const MessageBubble = memo(function MessageBubble({
         <div className="flex items-center gap-2 opacity-0 transition focus-within:opacity-100 group-hover/user:opacity-100">
           {onEdit && (
             <button
+              type="button"
               onClick={() => onEdit(message.text)}
               aria-label="Edit and resend"
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1720,6 +1767,7 @@ const MessageBubble = memo(function MessageBubble({
             </button>
           )}
           <button
+            type="button"
             onClick={copyText}
             aria-label="Copy message"
             className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -1738,7 +1786,12 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className="group message-in flex flex-col items-start gap-2">
+      {/* aria-atomic="false" so assistive tech reads only what's newly added
+          to this streaming container, not the whole answer over again on
+          every token */}
       <div
+        aria-live="polite"
+        aria-atomic="false"
         className={`w-full text-sm leading-relaxed text-card-foreground ${
           message.flash ? 'text-flash' : ''
         }`}
@@ -1783,36 +1836,19 @@ const MessageBubble = memo(function MessageBubble({
         <div className="flex flex-wrap items-center gap-2">
           {message.sources && message.sources.length > 0 ? (
             message.sources.map((s, i) => (
-              <div key={`${s.file}-${s.page}`} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
-                  aria-expanded={openSourceIdx === i}
-                  title="See the exact passage"
-                  className="fade-in inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  {s.page ? `${s.file} · Page ${s.page}` : s.file}
-                </button>
-
-                {/* click-to-toggle popover, solid so it never shows the answer text
-                    through it; opens below the chip so it doesn't cover the answer above */}
-                {openSourceIdx === i && s.snippet && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setOpenSourceIdx(null)} />
-                    <div className="fade-in absolute top-full left-0 z-50 mt-2 w-72 max-w-md max-h-64 overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
-                      <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-                        Source passage
-                      </p>
-                      <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-                        {s.snippet}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
+              <button
+                key={`${s.file}-${s.page}`}
+                type="button"
+                onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
+                aria-expanded={openSourceIdx === i}
+                title="See the exact passage"
+                className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {s.page ? `${s.file} · Page ${s.page}` : s.file}
+              </button>
             ))
           ) : (
             message.grounded === false && (
@@ -1922,6 +1958,7 @@ const MessageBubble = memo(function MessageBubble({
           )}
 
           <button
+            type="button"
             onClick={copyText}
             aria-label="Copy answer"
             className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground opacity-0 transition hover:text-foreground focus:opacity-100 group-hover:opacity-100"
@@ -1943,6 +1980,37 @@ const MessageBubble = memo(function MessageBubble({
               </>
             )}
           </button>
+
+          {/* regenerate — only ever rendered for the last assistant answer
+              (the caller only passes onRegenerate in that one case) */}
+          {onRegenerate && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              aria-label="Regenerate answer"
+              title="Regenerate answer"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground opacity-0 transition hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+            >
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M3 12a9 9 0 0 1 15.3-6.4M21 12a9 9 0 0 1-15.3 6.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M18 3v4h-4M6 21v-4h4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* expanded source passage — inline block below the chip row so it pushes
+          later content down instead of overlaying it (was an absolute popover) */}
+      {message.done && openSourceIdx !== null && message.sources?.[openSourceIdx]?.snippet && (
+        <div className="fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
+          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+            Source passage
+          </p>
+          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
+            {message.sources[openSourceIdx].snippet}
+          </p>
         </div>
       )}
     </div>

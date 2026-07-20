@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from 'react'
 
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function scrollToTool() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 /**
  * Scroll handoff: once the hero scrolls out of view, a slim glass bar slides
  * down with the Crux wordmark and a single CTA. The hero gives up the stage;
@@ -20,10 +26,6 @@ export function StickyBar() {
     observer.observe(hero)
     return () => observer.disconnect()
   }, [])
-
-  const scrollToTool = () => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
 
   return (
     <div

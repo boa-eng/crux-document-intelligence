@@ -17,7 +17,10 @@ export function WhyCrux() {
         className={`mx-auto max-w-2xl text-center reveal ${visible ? 'is-visible' : ''}`}
       >
         <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance md:text-4xl">
-          Your team already wrote the answer. Crux remembers where.
+          {/* two-tone treatment: text unchanged, just split at the sentence
+              break so the headline gets some visual hierarchy */}
+          <span className="text-foreground">Your team already wrote the answer.</span>{' '}
+          <span className="text-muted-foreground">Crux remembers where.</span>
         </h2>
         <div className="mt-10 flex flex-col gap-4">
           {VALUES.map((v) => (

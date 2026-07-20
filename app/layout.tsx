@@ -45,6 +45,11 @@ export default function RootLayout({
       className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} bg-background`}
     >
       <body className="font-sans antialiased">
+        {/* Paper grain: a faint noise texture over the whole page so the flat
+            "Paper and Ink" background reads as paper, not a digital fill.
+            First child so it sits behind all real content (see z-index in
+            .grain-overlay); aria-hidden because it's pure decoration. */}
+        <div className="grain-overlay" aria-hidden="true" />
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

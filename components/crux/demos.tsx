@@ -41,16 +41,18 @@ const DEMOS: Demo[] = [
 
 const TABS = ['All', 'Legal', 'Medical', 'Finance', 'HR']
 
+// Doesn't touch component state, so it lives outside the component — keeps
+// the function identity stable across renders instead of rebuilding it every time.
+function loadDemo() {
+  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
+}
+
 export function Demos() {
   const [active, setActive] = useState('All')
   const { ref, visible } = useReveal<HTMLDivElement>()
 
   const filtered =
     active === 'All' ? DEMOS : DEMOS.filter((d) => d.industry === active)
-
-  const loadDemo = (industry: string) => {
-    document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
-  }
 
   return (
     <section className="px-6 py-24">
@@ -64,6 +66,7 @@ export function Demos() {
           {TABS.map((tab) => (
             <button
               key={tab}
+              type="button"
               onClick={() => setActive(tab)}
               className={`relative px-4 py-2 text-sm font-medium transition-colors ${
                 active === tab
@@ -89,9 +92,11 @@ export function Demos() {
           {filtered.map((d) => (
             <div
               key={d.tag}
-              className="fade-in group flex flex-col rounded-2xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-accent/50 hover:shadow-[0_8px_40px_-12px_var(--accent)]"
+              className="fade-in group flex flex-col rounded-2xl border border-border bg-card p-6 transition-colors duration-200 hover:border-accent/40"
             >
-              <span className="self-start rounded-full bg-accent/15 px-3 py-1 font-mono text-[11px] tracking-wide text-accent">
+              {/* category tag: a hairline label, not another accent fill — burgundy
+                  stays reserved for the primary CTA and active states */}
+              <span className="self-start rounded-full border border-border px-3 py-1 font-mono text-[11px] tracking-wide text-muted-foreground">
                 {d.tag}
               </span>
               <p className="mt-4 text-xs text-muted-foreground">
@@ -120,7 +125,8 @@ export function Demos() {
                 {d.source}
               </span>
               <button
-                onClick={() => loadDemo(d.industry)}
+                type="button"
+                onClick={loadDemo}
                 className="mt-5 text-sm font-semibold text-accent transition-colors hover:text-accent-glow"
               >
                 Try a demo like this →

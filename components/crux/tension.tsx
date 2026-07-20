@@ -4,7 +4,7 @@ import { useReveal } from './use-reveal'
 
 const LINES = [
   'The answer is in there.',
-  'Buried in there, somewhere.',
+  'Buried somewhere.',
   'You don’t have time to look.',
 ]
 
@@ -17,7 +17,7 @@ export function Tension() {
         <h2 className="font-heading font-extrabold leading-[1.15] tracking-tight text-balance" style={{ fontSize: 'clamp(36px, 5vw, 56px)' }}>
           {LINES.map((line, i) => (
             <span
-              key={i}
+              key={line}
               className="block transition-all duration-700"
               style={{
                 opacity: visible ? 1 : 0,
@@ -36,7 +36,7 @@ export function Tension() {
             transitionDelay: `${LINES.length * 200}ms`,
           }}
         >
-          So Crux reads it for you. And shows you exactly where.
+          Crux finds it. And shows you where.
         </p>
       </div>
     </section>
