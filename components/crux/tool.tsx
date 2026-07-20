@@ -862,7 +862,7 @@ export function Tool() {
   const showHeader = hasDocs || messages.length > 0
 
   return (
-    <section id="tool" className="relative px-6 py-20 md:py-28">
+    <section id="tool" className="tool-dark relative px-6 py-20 md:py-28">
       <div className="mx-auto max-w-3xl lg:max-w-4xl">
         {/* Chat panel — always present, whole panel is a drop target */}
         <div
@@ -891,7 +891,7 @@ export function Tool() {
             setDragOver(false)
             if (e.dataTransfer.files.length) addFiles(Array.from(e.dataTransfer.files))
           }}
-          className={`overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
+          className={`tool-card overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
             dragOver ? 'border-accent bg-accent/5' : 'border-border'
           }`}
         >
@@ -1149,12 +1149,14 @@ export function Tool() {
               </div>
             </div>
 
-            {/* Composer wrapper. Was "liquid glass" (blur/inset-shine/coloured
-                glow) — dropped because those effects were nearly invisible on
-                the light paper background and just added complexity. Now a
-                plain solid card that still shows a clear focus state. */}
+            {/* Composer wrapper. Liquid glass (blur/inset-tint/focus glow) was
+                dropped on the light paper background — nearly invisible there,
+                just added complexity. It's back here because the tool surface
+                is dark now: .tool-composer (see globals.css) supplies the
+                frosted background and accent-tinted inner glow; this element
+                still gets its shape/padding/focus-border from Tailwind. */}
             <div className="relative">
-              <div className="relative rounded-2xl border border-border bg-card px-3 pb-2.5 pt-3 transition focus-within:border-accent">
+              <div className="tool-composer relative rounded-2xl border border-border bg-card px-3 pb-2.5 pt-3 transition focus-within:border-accent">
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1748,7 +1750,7 @@ const MessageBubble = memo(function MessageBubble({
   if (isUser) {
     return (
       <div className="group/user message-in flex flex-col items-end gap-1">
-        <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground">
+        <div className="tool-bubble max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground">
           {message.text}
         </div>
         {/* hover actions: edit (resend) · copy — like Claude */}

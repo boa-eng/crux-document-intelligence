@@ -315,6 +315,129 @@
 }
 
 /* ============================================
+   TOOL SURFACE — DARK LIQUID GLASS. Applied only to <section id="tool">
+   via the .tool-dark class, so the paper/burgundy landing page is untouched.
+   Crossing from the paper page into the tool should feel like stepping into
+   the engine room: warm near-black ink, a frosted glass composer, citations
+   that glow instead of sitting flat.
+
+   Rather than rewrite every className in tool.tsx, most of the semantic
+   tokens the markup already reads (--card, --border, --foreground,
+   --muted-foreground, --teal, --warn) are re-pointed at dark equivalents
+   for this one subtree — everything built on top of them (chips, popovers,
+   the gaps modal, feedback UI) goes dark for free. --accent is deliberately
+   LEFT ALONE here: it's still used as a solid button fill (bg-accent +
+   accent-foreground text), and that pairing already has ~8:1 contrast
+   regardless of page background. Lifting --accent globally would have
+   dimmed that same button text toward ~3:1 (fails 4.5:1) — so accent text
+   sitting directly on the dark ink (links, hover states, citation chips)
+   uses --accent-bright instead, added via a few targeted selectors below.
+   ============================================ */
+.tool-dark {
+  --tool-bg: #191512;
+  --tool-surface: #211C18;
+  --tool-glass: rgba(33, 28, 24, 0.55);
+  --tool-border: rgba(255, 255, 255, 0.08);
+  --tool-border-strong: rgba(255, 255, 255, 0.14);
+  --tool-fg: #F2EDE6;
+  --tool-fg-muted: #A89F93;
+  --accent-bright: color-mix(in srgb, var(--accent) 60%, white);
+  --teal-bright: color-mix(in srgb, var(--teal) 55%, white);
+  --warn-bright: color-mix(in srgb, var(--warn) 60%, white);
+
+  --foreground: var(--tool-fg);
+  --card: var(--tool-surface);
+  --card-foreground: var(--tool-fg);
+  --surface: var(--tool-surface);
+  --border: var(--tool-border);
+  --muted: var(--tool-surface);
+  --muted-foreground: var(--tool-fg-muted);
+  /* teal/warn are only ever used as text or low-opacity tints here (never a
+     solid button fill), so lifting them globally for this subtree is safe */
+  --teal: var(--teal-bright);
+  --warn: var(--warn-bright);
+
+  color-scheme: dark;
+}
+
+/* outer slab — the tool sits on the paper page like a physical dark panel */
+.tool-card {
+  background: var(--tool-bg) !important;
+  box-shadow: 0 32px 80px -28px rgba(0, 0, 0, 0.6);
+}
+
+/* the composer — the one true "liquid glass" moment: frosted, faintly lit
+   from within by the accent, brightens its edge on focus */
+.tool-composer {
+  background: var(--tool-glass);
+  border-color: var(--tool-border-strong);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background-image: radial-gradient(
+    130% 160% at 12% -10%,
+    color-mix(in srgb, var(--accent-bright) 6%, transparent),
+    transparent 60%
+  );
+}
+
+/* user bubble — an accent-tinted dark surface, not a flat solid fill */
+.tool-dark .tool-bubble {
+  background: color-mix(in srgb, var(--accent) 45%, var(--tool-surface));
+}
+
+/* citation chips: dark glass pills that glow, replacing the flat teal pill
+   used on the paper page */
+.tool-dark .citation-stamp {
+  background: var(--tool-glass);
+  border-color: var(--tool-border);
+  color: var(--accent-bright);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px -4px color-mix(in srgb, var(--accent-bright) 45%, transparent);
+}
+.tool-dark .citation-stamp:hover {
+  background: color-mix(in srgb, var(--tool-glass) 85%, var(--accent-bright) 10%);
+  box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent-bright) 60%, transparent);
+}
+
+/* streaming caret reads better lifted against the deep ink */
+.tool-dark .stream-caret {
+  background: var(--accent-bright);
+}
+
+/* thinking-skeleton shimmer: same .skeleton-line hook, tuned brighter so the
+   sweep still reads as motion against the dark base (both --surface and
+   --card collapse to the same tool-surface in dark mode) */
+.tool-dark .skeleton-line {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-bright) 10%, var(--tool-surface)) 25%,
+    color-mix(in srgb, var(--accent-bright) 22%, var(--tool-surface)) 50%,
+    color-mix(in srgb, var(--accent-bright) 10%, var(--tool-surface)) 75%
+  );
+}
+
+/* accent used as TEXT (not a button fill) on the dark ink needs the lifted,
+   higher-contrast variant — targeted at the exact utility classes tool.tsx
+   already uses, so no className strings need to change */
+.tool-dark .text-accent,
+.tool-dark .hover\:text-accent:hover {
+  color: var(--accent-bright);
+}
+.tool-dark .border-accent,
+.tool-dark .hover\:border-accent\/50:hover,
+.tool-dark .focus\:border-accent:focus,
+.tool-dark .focus-within\:border-accent:focus-within {
+  border-color: var(--accent-bright);
+}
+
+/* the gaps-modal scrim was tinted from --foreground, which is now near-white
+   in this subtree — keep it a dark scrim regardless */
+.tool-dark .bg-foreground\/20 {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================
    REDUCED MOTION
    ============================================ */
 @media (prefers-reduced-motion: reduce) {
