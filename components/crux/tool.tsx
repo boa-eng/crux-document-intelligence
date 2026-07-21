@@ -104,6 +104,45 @@ type Message = {
   rating?: 'up' | 'down'
 }
 
+/** Serialize one stored message into the backend's history turn shape. Assistant
+ *  turns carry their citation chip labels as `citations` so a follow-up like
+ *  "which page did that come from?" lets the backend name the exact pages it
+ *  cited last turn — the history text alone has no record of them. */
+function toHistoryItem(m: Message): {
+  role: string
+  content: string
+  citations?: string[]
+} {
+  const role = m.role === 'crux' ? 'assistant' : 'user'
+  const item: { role: string; content: string; citations?: string[] } = {
+    role,
+    content: m.text,
+  }
+  if (role === 'assistant' && m.sources?.length) {
+    // rebuild the exact chip label the user saw: "file · p. 12" (or just "file")
+    item.citations = m.sources.map((s) =>
+      s.page ? `${s.file} · p. ${s.page}` : s.file,
+    )
+  }
+  return item
+}
+
+/** A follow-up like "which page did that come from?" comes back with citation
+ *  labels but no passage text — the backend only echoes the prior page, not the
+ *  snippet. Borrow the snippet from the most recent earlier turn that cited the
+ *  same file+page, so the chip still opens a real Source passage instead of a
+ *  dead, empty panel. */
+function backfillSnippet(c: Source, prev: Message[]): Source {
+  if (c.snippet) return c
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const hit = prev[i].sources?.find(
+      (s) => s.file === c.file && s.page === c.page && s.snippet,
+    )
+    if (hit) return { ...c, snippet: hit.snippet }
+  }
+  return c
+}
+
 let idSeq = 1
 
 /** Taglines rotate by day-of-month so they change daily without being random
@@ -407,7 +446,7 @@ export function Tool() {
   /** Read the SSE token stream from POST /chat into the crux bubble. */
   const runQuery = async (
     question: string,
-    history: { role: string; content: string }[],
+    history: { role: string; content: string; citations?: string[] }[],
     generalOnly = false,
   ) => {
     setIsGenerating(true)
@@ -492,7 +531,9 @@ export function Tool() {
                   done: true,
                   flash: true,
                   grounded,
-                  sources: grounded ? (final?.citations ?? []).map(parseCitation) : undefined,
+                  sources: grounded
+                    ? (final?.citations ?? []).map(parseCitation).map((c) => backfillSnippet(c, prev))
+                    : undefined,
                   notCovered: final?.notCovered === true,
                 }
               : m,
@@ -638,10 +679,7 @@ export function Tool() {
     // backend memory format: user/assistant turns from finished messages
     const history = messages
       .filter((m) => m.done && m.text)
-      .map((m) => ({
-        role: m.role === 'crux' ? 'assistant' : 'user',
-        content: m.text,
-      }))
+      .map(toHistoryItem)
 
     // sending always jumps to the newest message
     atBottomRef.current = true
@@ -669,7 +707,7 @@ export function Tool() {
     atBottomRef.current = true
     const history = messages
       .filter((m) => m.done && m.text)
-      .map((m) => ({ role: m.role === 'crux' ? 'assistant' : 'user', content: m.text }))
+      .map(toHistoryItem)
     runQuery(question, history, true)
   }
 
@@ -691,7 +729,7 @@ export function Tool() {
     atBottomRef.current = true
     const history = messages
       .filter((m) => m.done && m.text && m.id !== msgId)
-      .map((m) => ({ role: m.role === 'crux' ? 'assistant' : 'user', content: m.text }))
+      .map(toHistoryItem)
     runQuery(question, history)
   }
 
@@ -1545,6 +1583,11 @@ function normalizeDisplayEnv(s: string): string {
 
 function sanitizeMd(text: string): string {
   let out = text.replace(/<br\s*\/?>/gi, '  \n')
+  // The model sometimes emits bold with a space just inside the markers, e.g.
+  // "**(5) **". A space touching the inner edge makes the closing ** invalid in
+  // CommonMark, so it renders as literal asterisks. Pull any inner-edge space
+  // outside the markers so the emphasis parses and the spacing is preserved.
+  out = out.replace(/\*\*(\s*)([^*\n]+?)(\s*)\*\*/g, '$1**$2**$3')
   // The model emits LaTeX with \( \) and \[ \] delimiters, but remark-math only
   // recognises $ … $ and $$ … $$. Normalise so equations actually render.
   out = out
@@ -1683,6 +1726,10 @@ const MessageBubble = memo(function MessageBubble({
   // Which source chip's passage popover is open, if any. Click-to-toggle so it
   // works on touch and keyboard, not just mouse hover.
   const [openSourceIdx, setOpenSourceIdx] = useState<number | null>(null)
+  // Points at the opened passage panel so we can scroll it into view. The
+  // last message has nothing below it to push the panel up, so without this it
+  // opens below the fold and gets clipped by the composer.
+  const sourcePanelRef = useRef<HTMLDivElement>(null)
   // "What went wrong?" popover for a down-vote, plus its optional detail fields.
   const [downOpen, setDownOpen] = useState(false)
   const [category, setCategory] = useState('')
@@ -1701,6 +1748,33 @@ const MessageBubble = memo(function MessageBubble({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [openSourceIdx, downOpen])
+  // When a passage opens, pull it fully into view inside the chat scroll area.
+  // rAF waits for the panel to mount and lay out first. The panel now renders
+  // ABOVE the chip row (grows upward), so 'nearest' just nudges it into view if
+  // it's slightly off-screen — no jarring jump to the bottom like block:'end' did.
+  useEffect(() => {
+    if (openSourceIdx === null) return
+    const raf = requestAnimationFrame(() => {
+      sourcePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [openSourceIdx])
+  // Tap anywhere outside the open passage to dismiss it. The panel can block the
+  // messages above it, so clicking away is the quickest way to get the view back.
+  // Clicks on the panel itself (scrolling it) and on a citation chip (which owns
+  // its own open/close toggle) are left alone so they don't fight this handler.
+  useEffect(() => {
+    if (openSourceIdx === null) return
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (!t) return
+      if (sourcePanelRef.current?.contains(t)) return
+      if (t.closest?.('.citation-stamp')) return
+      setOpenSourceIdx(null)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [openSourceIdx])
   useEffect(() => {
     if (downOpen) downTextareaRef.current?.focus()
   }, [downOpen])
@@ -1830,6 +1904,20 @@ const MessageBubble = memo(function MessageBubble({
           >
             No
           </button>
+        </div>
+      )}
+
+      {/* expanded source passage — rendered ABOVE the chip row so it grows
+          upward. On the bottom message that keeps the passage comfortably in
+          view instead of opening down under the composer. */}
+      {message.done && openSourceIdx !== null && message.sources?.[openSourceIdx]?.snippet && (
+        <div ref={sourcePanelRef} className="fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
+          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+            Source passage
+          </p>
+          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
+            {message.sources[openSourceIdx].snippet}
+          </p>
         </div>
       )}
 
@@ -2003,18 +2091,6 @@ const MessageBubble = memo(function MessageBubble({
         </div>
       )}
 
-      {/* expanded source passage — inline block below the chip row so it pushes
-          later content down instead of overlaying it (was an absolute popover) */}
-      {message.done && openSourceIdx !== null && message.sources?.[openSourceIdx]?.snippet && (
-        <div className="fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
-          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-            Source passage
-          </p>
-          <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
-            {message.sources[openSourceIdx].snippet}
-          </p>
-        </div>
-      )}
     </div>
   )
 })
