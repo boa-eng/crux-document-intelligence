@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -899,294 +899,37 @@ export function Tool() {
 
   const showHeader = hasDocs || messages.length > 0
 
-  return (
-    <section id="tool" className="tool-dark relative px-6 py-20 md:py-28">
-      <div className="mx-auto max-w-3xl lg:max-w-4xl">
-        {/* Chat panel — always present, whole panel is a drop target */}
-        <div
-          onDragEnter={(e) => {
-            // only react to files, never to text/element selection drags
-            if (!e.dataTransfer.types.includes('Files')) return
-            e.preventDefault()
-            dragDepth.current += 1
-            setDragOver(true)
-          }}
-          onDragOver={(e) => {
-            if (!e.dataTransfer.types.includes('Files')) return
-            e.preventDefault()
-          }}
-          onDragLeave={(e) => {
-            if (!e.dataTransfer.types.includes('Files')) return
-            dragDepth.current -= 1
-            if (dragDepth.current <= 0) {
-              dragDepth.current = 0
-              setDragOver(false)
-            }
-          }}
-          onDrop={(e) => {
-            e.preventDefault()
-            dragDepth.current = 0
-            setDragOver(false)
-            if (e.dataTransfer.files.length) addFiles(Array.from(e.dataTransfer.files))
-          }}
-          className={`tool-card overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
-            dragOver ? 'border-accent bg-accent/5' : 'border-border'
-          }`}
-        >
-          {/* Header — file context + visible clear */}
-          {showHeader && (
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
-              <span className="truncate text-sm text-muted-foreground">
-                {hasDocs ? (
-                  <>
-                    Asking{' '}
-                    <span className="font-medium text-foreground">
-                      {files.length === 1
-                        ? files[0].name
-                        : `${files.length} documents`}
-                    </span>
-                  </>
-                ) : (
-                  'New conversation'
-                )}
-              </span>
-              <div className="flex shrink-0 items-center gap-2">
-                {hasDocs && sessionId && (
-                  <button
-                    type="button"
-                    onClick={openGaps}
-                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
-                    </svg>
-                    Knowledge gaps
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={clearSession}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path
-                      d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  Clear session
-                </button>
-              </div>
-            </div>
-          )}
+  // Empty-state composer placement (DESIGN.md Part 3, layout rule 7): once a
+  // document is uploaded but nothing has been asked yet, the composer sits
+  // centered in the chat area (greeting above, suggestion chips below), then
+  // docks to the bottom slot the moment the first message exists. General chat
+  // with no documents keeps the docked layout it has today.
+  const composerCentered = hasDocs && messages.length === 0 && !isGenerating
 
-          {/* Knowledge-gaps panel: what the uploaded documents keep failing to
-              answer. Surfaces a backend feature (/gaps/summary) that already
-              existed with no UI — this is its first visible entry point. */}
-          {gapsOpen && (
-            <>
-              <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm" onClick={() => setGapsOpen(false)} />
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-                <div
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label="Knowledge gaps"
-                  className="fade-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl"
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="font-heading text-lg font-semibold text-foreground">Knowledge gaps</h2>
-                    <button
-                      type="button"
-                      onClick={() => setGapsOpen(false)}
-                      aria-label="Close"
-                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </div>
+  // Moving the composer between slots remounts its DOM nodes, which silently
+  // drops keyboard focus and the textarea's auto-grown height. Restore both
+  // whenever the slot flips so typing continues uninterrupted across the dock
+  // transition (send() keeps focus in the box, per the composer patterns brief).
+  const prevCenteredRef = useRef(composerCentered)
+  useEffect(() => {
+    if (prevCenteredRef.current === composerCentered) return
+    prevCenteredRef.current = composerCentered
+    const el = inputRef.current
+    if (el) {
+      el.focus()
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+    }
+  }, [composerCentered])
 
-                  {gapsLoading ? (
-                    <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
-                      <span className="thinking-orb !h-4 !w-4" />
-                      Looking through what your documents couldn&apos;t answer…
-                    </div>
-                  ) : gapsUnavailable ? (
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      Knowledge gaps need persistent storage (Teams mode) to track questions across a
-                      session. This deployment is running in Private mode, so nothing is stored to
-                      analyse — by design.
-                    </p>
-                  ) : gapsCount === 0 ? (
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      No gaps yet — every question so far was answered from the documents.
-                    </p>
-                  ) : (
-                    <>
-                      <p className="mb-3 text-xs text-muted-foreground">
-                        Based on {gapsCount} question{gapsCount === 1 ? '' : 's'} your documents couldn&apos;t answer:
-                      </p>
-                      <div className="text-sm leading-relaxed text-card-foreground">
-                        <CruxMarkdown text={gapsSummary} />
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Announces a finished answer once, without spamming every streamed token */}
-          <div aria-live="polite" className="sr-only">
-            {announceText}
-          </div>
-
-          {/* Messages */}
-          <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="max-h-[600px] min-h-[320px] space-y-4 overflow-y-auto p-5"
-          >
-            {messages.length === 0 && !isGenerating && (
-              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2.5 text-center">
-                {/* Product first, name-ask second: nothing here blocks a first-time
-                    visitor from immediately seeing what Crux does. */}
-                {greetingData.headline && (
-                  <p className="max-w-sm font-heading text-2xl font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
-                    {greetingData.headline}
-                  </p>
-                )}
-
-                {greetingData.tagline && (
-                  <p className="text-sm font-medium text-muted-foreground">
-                    {greetingData.tagline}
-                  </p>
-                )}
-
-                {!hasDocs && (
-                  <>
-                    <svg className="h-7 w-7 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <p className="text-sm text-muted-foreground">
-                      Drop a document here, or just start typing.
-                    </p>
-                    <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground/80">
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                        <rect x="5" y="11" width="14" height="9" rx="2" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      Read in memory · never stored
-                    </p>
-                  </>
-                )}
-
-                {/* small, optional, non-blocking — never had to be answered to use Crux.
-                    Kept visually quiet (smaller, softer border) so it reads as a minor
-                    aside, not a competitor to the "drop a document" line above it. */}
-                {!nameDone && (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      setName(nameDraft.trim())
-                      setNameDone(true)
-                    }}
-                    className="mt-2"
-                  >
-                    <input
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      placeholder="What should I call you? (optional)"
-                      className="w-56 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
-                    />
-                  </form>
-                )}
-              </div>
-            )}
-
-            {messages.map((m, i) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                onEdit={editMessage}
-                onAnswerGeneral={() => answerGeneral(m.id, messages[i - 1]?.text ?? '')}
-                onDeclineGeneral={() => declineGeneral(m.id)}
-                onFeedback={(rating, detail) =>
-                  sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating, m.sources, detail)
-                }
-                // regenerate only ever offered on the LAST assistant message
-                onRegenerate={
-                  m.role === 'crux' && m.done && i === messages.length - 1
-                    ? () => regenerate(m.id, messages[i - 1]?.text ?? '')
-                    : undefined
-                }
-              />
-            ))}
-
-            {isGenerating && (
-              <div className="message-in">
-                <ThinkingSkeleton fading={orbFading} />
-              </div>
-            )}
-
-            {/* limit reached card */}
-            {limitReached && (
-              <div className="fade-in rounded-xl border border-warn/40 bg-surface p-4 text-center">
-                <p className="text-sm text-foreground">
-                  You&apos;ve used your 15 free messages.
-                </p>
-                <a
-                  href="#contact"
-                  className="mt-3 inline-block rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground transition hover:scale-[1.02]"
-                >
-                  Book a 15-minute call →
-                </a>
-              </div>
-            )}
-          </div>
-
-          {/* Composer */}
-          <div className="border-t border-border p-4">
-            {/* Notify bar — sits directly above the composer (Claude-style), same
-                width as it. The wrapper is always mounted and animates height via a
-                grid-rows transition so the composer below never jumps. */}
-            <div
-              className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out ${
-                notifyPromptVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-              }`}
-            >
-              <div className="min-h-0">
-                <div className="mb-2.5 flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3.5 py-2">
-                  <span className="text-xs text-foreground">
-                    Want to be notified when your answer is ready?
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleNotifyChoice(true)}
-                      className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
-                    >
-                      Notify me
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNotifyPromptVisible(false)}
-                      aria-label="Dismiss"
-                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+  // ONE composer, two slots. This JSX renders in exactly one place per
+  // render: centered in the empty state once a document is uploaded but no
+  // message has been sent (Gemini/ChatGPT opening screen), or in the docked
+  // border-t slot at the bottom the moment any message exists. It must stay
+  // a single instance because it carries live state (draft text, attachments,
+  // mic recording, send/stop) that has to survive the dock transition.
+  const composerBox = (
+    <>
             {/* Composer wrapper. Liquid glass (blur/inset-tint/focus glow) was
                 dropped on the light paper background — nearly invisible there,
                 just added complexity. It's back here because the tool surface
@@ -1465,6 +1208,333 @@ export function Tool() {
               </form>
             </div>
             </div>
+    </>
+  )
+
+  return (
+    <section id="tool" className="tool-dark relative px-6 py-20 md:py-28">
+      <div className="mx-auto max-w-3xl lg:max-w-4xl">
+        {/* Chat panel — always present, whole panel is a drop target */}
+        <div
+          onDragEnter={(e) => {
+            // only react to files, never to text/element selection drags
+            if (!e.dataTransfer.types.includes('Files')) return
+            e.preventDefault()
+            dragDepth.current += 1
+            setDragOver(true)
+          }}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes('Files')) return
+            e.preventDefault()
+          }}
+          onDragLeave={(e) => {
+            if (!e.dataTransfer.types.includes('Files')) return
+            dragDepth.current -= 1
+            if (dragDepth.current <= 0) {
+              dragDepth.current = 0
+              setDragOver(false)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            dragDepth.current = 0
+            setDragOver(false)
+            if (e.dataTransfer.files.length) addFiles(Array.from(e.dataTransfer.files))
+          }}
+          className={`tool-card overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors ${
+            dragOver ? 'border-accent bg-accent/5' : 'border-border'
+          }`}
+        >
+          {/* Header — file context + visible clear */}
+          {showHeader && (
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <span className="truncate text-sm text-muted-foreground">
+                {hasDocs ? (
+                  <>
+                    Asking{' '}
+                    <span className="font-medium text-foreground">
+                      {files.length === 1
+                        ? files[0].name
+                        : `${files.length} documents`}
+                    </span>
+                  </>
+                ) : (
+                  'New conversation'
+                )}
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                {hasDocs && sessionId && (
+                  <button
+                    type="button"
+                    onClick={openGaps}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+                    </svg>
+                    Knowledge gaps
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={clearSession}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path
+                      d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Clear session
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Knowledge-gaps panel: what the uploaded documents keep failing to
+              answer. Surfaces a backend feature (/gaps/summary) that already
+              existed with no UI — this is its first visible entry point. */}
+          {gapsOpen && (
+            <>
+              <div className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm" onClick={() => setGapsOpen(false)} />
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Knowledge gaps"
+                  className="fade-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl"
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="font-heading text-lg font-semibold text-foreground">Knowledge gaps</h2>
+                    <button
+                      type="button"
+                      onClick={() => setGapsOpen(false)}
+                      aria-label="Close"
+                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {gapsLoading ? (
+                    <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                      <span className="thinking-orb !h-4 !w-4" />
+                      Looking through what your documents couldn&apos;t answer…
+                    </div>
+                  ) : gapsUnavailable ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Knowledge gaps need persistent storage (Teams mode) to track questions across a
+                      session. This deployment is running in Private mode, so nothing is stored to
+                      analyse — by design.
+                    </p>
+                  ) : gapsCount === 0 ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      No gaps yet — every question so far was answered from the documents.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="mb-3 text-xs text-muted-foreground">
+                        Based on {gapsCount} question{gapsCount === 1 ? '' : 's'} your documents couldn&apos;t answer:
+                      </p>
+                      <div className="text-sm leading-relaxed text-card-foreground">
+                        <CruxMarkdown text={gapsSummary} />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Announces a finished answer once, without spamming every streamed token */}
+          <div aria-live="polite" className="sr-only">
+            {announceText}
+          </div>
+
+          {/* Messages */}
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="max-h-[600px] min-h-[320px] space-y-6 overflow-y-auto p-5"
+          >
+            {messages.length === 0 && !isGenerating && (
+              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2.5 text-center">
+                {/* Product first, name-ask second: nothing here blocks a first-time
+                    visitor from immediately seeing what Crux does. */}
+                {greetingData.headline && (
+                  <p className="max-w-sm font-heading text-2xl font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
+                    {greetingData.headline}
+                  </p>
+                )}
+
+                {greetingData.tagline && (
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {greetingData.tagline}
+                  </p>
+                )}
+
+                {!hasDocs && (
+                  <>
+                    <svg className="h-7 w-7 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <p className="text-sm text-muted-foreground">
+                      Drop a document here, or just start typing.
+                    </p>
+                    <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground/80">
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                        <rect x="5" y="11" width="14" height="9" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Read in memory · never stored
+                    </p>
+                  </>
+                )}
+
+                {/* Centered composer slot (empty state with a document): the ONE
+                    composerBox instance renders here instead of the docked slot
+                    below. text-left undoes the empty state's text-center so the
+                    textarea and its chips read normally. */}
+                {composerCentered && (
+                  <div className="mt-3 w-full text-left">{composerBox}</div>
+                )}
+
+                {/* document-aware suggestion chips — an empty-state device only
+                    (they never appear once the conversation starts). Clicking one
+                    fills the composer via editMessage so the user can send or edit
+                    it, matching Gemini/ChatGPT's opening screen. Shown only once a
+                    document exists, since every suggestion is about that document. */}
+                {hasDocs && (
+                  <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                    {[
+                      files.length > 1 ? 'Summarize these documents' : 'Summarize this document',
+                      'What are the key figures?',
+                      ...(files.length > 1 ? ['Compare the uploaded files'] : []),
+                    ].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => editMessage(chip)}
+                        className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted-foreground transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* small, optional, non-blocking — never had to be answered to use Crux.
+                    Kept visually quiet (smaller, softer border) so it reads as a minor
+                    aside, not a competitor to the "drop a document" line above it. */}
+                {!nameDone && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      setName(nameDraft.trim())
+                      setNameDone(true)
+                    }}
+                    className="mt-2"
+                  >
+                    <input
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      placeholder="What should I call you? (optional)"
+                      className="w-56 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
+                    />
+                  </form>
+                )}
+              </div>
+            )}
+
+            {messages.map((m, i) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onEdit={editMessage}
+                onAnswerGeneral={() => answerGeneral(m.id, messages[i - 1]?.text ?? '')}
+                onDeclineGeneral={() => declineGeneral(m.id)}
+                onFeedback={(rating, detail) =>
+                  sendFeedback(m.id, messages[i - 1]?.text ?? '', m.text, rating, m.sources, detail)
+                }
+                // regenerate only ever offered on the LAST assistant message
+                onRegenerate={
+                  m.role === 'crux' && m.done && i === messages.length - 1
+                    ? () => regenerate(m.id, messages[i - 1]?.text ?? '')
+                    : undefined
+                }
+              />
+            ))}
+
+            {isGenerating && (
+              <div className="message-in">
+                <ThinkingSkeleton fading={orbFading} />
+              </div>
+            )}
+
+            {/* limit reached card */}
+            {limitReached && (
+              <div className="fade-in rounded-xl border border-warn/40 bg-surface p-4 text-center">
+                <p className="text-sm text-foreground">
+                  You&apos;ve used your 15 free messages.
+                </p>
+                <a
+                  href="#contact"
+                  className="mt-3 inline-block rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-foreground transition hover:scale-[1.02]"
+                >
+                  Book a 15-minute call →
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Docked composer slot — hidden while the composer renders centered
+              in the empty state above (composerCentered). Exactly one of the
+              two slots ever renders composerBox in a given frame. */}
+          {!composerCentered && (
+          <div className="border-t border-border p-4">
+            {/* Notify bar — sits directly above the composer (Claude-style), same
+                width as it. The wrapper is always mounted and animates height via a
+                grid-rows transition so the composer below never jumps. */}
+            <div
+              className={`grid overflow-hidden transition-[grid-template-rows] duration-300 ease-out ${
+                notifyPromptVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+              }`}
+            >
+              <div className="min-h-0">
+                <div className="mb-2.5 flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3.5 py-2">
+                  <span className="text-xs text-foreground">
+                    Want to be notified when your answer is ready?
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleNotifyChoice(true)}
+                      className="rounded-md bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground transition hover:bg-accent/90"
+                    >
+                      Notify me
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotifyPromptVisible(false)}
+                      aria-label="Dismiss"
+                      className="rounded p-1 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {composerBox}
 
             <p className="mt-3 text-center text-xs text-muted-foreground">
               Crux can make mistakes. Double-check the source.
@@ -1476,6 +1546,7 @@ export function Tool() {
               )}
             </p>
           </div>
+          )}
         </div>
       </div>
     </section>
@@ -1485,6 +1556,101 @@ export function Tool() {
 function formatTime(ts?: number) {
   if (!ts) return ''
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+/** Find the longest run of consecutive words that the source passage and the
+ *  answer share, and return its character span inside the ORIGINAL passage so we
+ *  can wrap it in a highlight. This is the trust signal: it points the eye at the
+ *  exact sentence the claim was lifted from. Cheap heuristic, not semantic — we
+ *  tokenise to lowercase words, then grow a contiguous run from each starting
+ *  word only while that run still appears verbatim in the answer. Requires a run
+ *  of >=4 words so common filler ("as shown in the") never lights up. Returns
+ *  null when there's no meaningful overlap, so the snippet renders untouched. */
+function overlapSpan(snippet: string, answer: string): [number, number] | null {
+  if (!snippet || !answer) return null
+  // word tokens of the snippet, each remembering where it sits in the raw string
+  const toks: { w: string; start: number; end: number }[] = []
+  const re = /[A-Za-z0-9]+/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(snippet)) !== null) {
+    toks.push({ w: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length })
+  }
+  // answer collapsed to a padded, space-joined stream of its words, so an
+  // n-word run is a plain substring test (`' run '` includes word boundaries)
+  const ansWords = answer.toLowerCase().match(/[A-Za-z0-9]+/g) ?? []
+  const ansJoined = ` ${ansWords.join(' ')} `
+  let best: [number, number] | null = null
+  let bestLen = 0
+  for (let i = 0; i < toks.length; i++) {
+    let run = ''
+    for (let j = i; j < toks.length; j++) {
+      run = run ? `${run} ${toks[j].w}` : toks[j].w
+      if (ansJoined.includes(` ${run} `)) {
+        const len = j - i + 1
+        if (len > bestLen) {
+          bestLen = len
+          best = [toks[i].start, toks[j].end]
+        }
+      } else {
+        break // run broke — no point extending it further from this start
+      }
+    }
+  }
+  return bestLen >= 4 ? best : null
+}
+
+/** Tier-2 highlight fallback for PARAPHRASED answers, where overlapSpan finds
+ *  no ≥4-word verbatim run. Instead of matching exact wording, score each
+ *  SENTENCE of the passage by how many of its content words also appear
+ *  anywhere in the answer (lowercase, punctuation stripped, words under 3
+ *  chars dropped so "the"/"of"/"is" never count). The single best sentence is
+ *  highlighted only if ≥25% of its content words show up in the answer — below
+ *  that the "match" is likely coincidental shared vocabulary, so we show no
+ *  highlight at all (same as today) rather than point at the wrong sentence.
+ *  Still pure-lexical: cheap, deterministic, no model call. */
+function fallbackSentenceSpan(snippet: string, answer: string): [number, number] | null {
+  const answerWords = new Set(answer.toLowerCase().match(/[A-Za-z0-9]{3,}/g) ?? [])
+  if (answerWords.size === 0) return null
+  // walk the snippet sentence by sentence, keeping each one's char offsets so
+  // the returned span maps back into the ORIGINAL string for highlighting
+  const sentenceRe = /[^.!?\n]+[.!?]*/g
+  let m: RegExpExecArray | null
+  let best: [number, number] | null = null
+  let bestRatio = 0
+  while ((m = sentenceRe.exec(snippet)) !== null) {
+    const words = m[0].toLowerCase().match(/[A-Za-z0-9]{3,}/g) ?? []
+    // skip fragments: a "sentence" of 1–3 content words (headings, stray page
+    // numbers) can hit 100% by accident and isn't a useful thing to point at
+    if (words.length < 4) continue
+    const hits = words.filter((w) => answerWords.has(w)).length
+    const ratio = hits / words.length
+    if (ratio > bestRatio) {
+      // trim leading whitespace the regex swallowed so the <mark> starts on text
+      const lead = m[0].length - m[0].trimStart().length
+      bestRatio = ratio
+      best = [m.index + lead, m.index + m[0].trimEnd().length]
+    }
+  }
+  return bestRatio >= 0.25 ? best : null
+}
+
+/** Render a source passage with its answer-supporting region wrapped in a
+ *  subtle highlight. Two tiers: (1) exact — the longest ≥4-word verbatim run
+ *  shared with the answer (overlapSpan); (2) fuzzy — when the answer
+ *  paraphrases, the sentence sharing the most content words with it
+ *  (fallbackSentenceSpan). Falls back to plain text when neither tier finds a
+ *  confident match, so the panel never looks broken. */
+function HighlightedSnippet({ snippet, answer }: { snippet: string; answer: string }) {
+  const span = overlapSpan(snippet, answer) ?? fallbackSentenceSpan(snippet, answer)
+  if (!span) return <>{snippet}</>
+  const [start, end] = span
+  return (
+    <>
+      {snippet.slice(0, start)}
+      <mark className="crux-hl">{snippet.slice(start, end)}</mark>
+      {snippet.slice(end)}
+    </>
+  )
 }
 
 // Defined once at module scope, NOT inside the component: passing a fresh
@@ -1509,9 +1675,12 @@ const MD_COMPONENTS: Components = {
     }
     return <code className="rounded bg-border/60 px-1 py-0.5 font-mono text-[12px]" {...props}>{children}</code>
   },
-  h1: (props) => <h3 className="mb-1 mt-2 font-semibold" {...props} />,
-  h2: (props) => <h3 className="mb-1 mt-2 font-semibold" {...props} />,
-  h3: (props) => <h3 className="mb-1 mt-2 font-semibold" {...props} />,
+  // headings sit just ONE step above the 14px body (→ 15px), not h1-scale — an
+  // un-boxed answer gets its structure from type + whitespace, so a big heading
+  // would shout. Extra top margin gives each section a little air.
+  h1: (props) => <h3 className="mb-1 mt-3 text-[15px] font-semibold" {...props} />,
+  h2: (props) => <h3 className="mb-1 mt-3 text-[15px] font-semibold" {...props} />,
+  h3: (props) => <h3 className="mb-1 mt-3 text-[15px] font-semibold" {...props} />,
   table: (props) => (
     <div className="my-2 overflow-x-auto">
       <table className="w-full border-collapse text-xs" {...props} />
@@ -1723,9 +1892,32 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
-  // Which source chip's passage popover is open, if any. Click-to-toggle so it
+  // Perplexity-style stacking: one chip per DOCUMENT, not per (file,page). Group
+  // the flat sources list by filename, preserving the backend's most-relevant-
+  // first order — so the first passage in each group (the one the chip labels) is
+  // the strongest hit for that document, and the rest page behind it. Pure
+  // frontend grouping; the backend contract (flat labels + snippets) is untouched.
+  const sourceGroups = useMemo(() => {
+    const groups: { file: string; items: Source[] }[] = []
+    const byFile = new Map<string, { file: string; items: Source[] }>()
+    for (const s of message.sources ?? []) {
+      let g = byFile.get(s.file)
+      if (!g) {
+        g = { file: s.file, items: [] }
+        byFile.set(s.file, g)
+        groups.push(g)
+      }
+      g.items.push(s)
+    }
+    return groups
+  }, [message.sources])
+  // Which document group's passage panel is open (null = none), and which passage
+  // within that group is showing (the ‹ › pager moves this). Click-to-toggle so it
   // works on touch and keyboard, not just mouse hover.
-  const [openSourceIdx, setOpenSourceIdx] = useState<number | null>(null)
+  const [openGroup, setOpenGroup] = useState<number | null>(null)
+  const [pageInGroup, setPageInGroup] = useState(0)
+  const activeGroup = openGroup !== null ? sourceGroups[openGroup] : undefined
+  const activePassage = activeGroup?.items[pageInGroup]
   // Points at the opened passage panel so we can scroll it into view. The
   // last message has nothing below it to push the panel up, so without this it
   // opens below the fold and gets clipped by the composer.
@@ -1738,43 +1930,43 @@ const MessageBubble = memo(function MessageBubble({
   const downTextareaRef = useRef<HTMLTextAreaElement>(null)
   const thanksTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (openSourceIdx === null && !downOpen) return
+    if (openGroup === null && !downOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setOpenSourceIdx(null)
+        setOpenGroup(null)
         setDownOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openSourceIdx, downOpen])
+  }, [openGroup, downOpen])
   // When a passage opens, pull it fully into view inside the chat scroll area.
   // rAF waits for the panel to mount and lay out first. The panel now renders
   // ABOVE the chip row (grows upward), so 'nearest' just nudges it into view if
   // it's slightly off-screen — no jarring jump to the bottom like block:'end' did.
   useEffect(() => {
-    if (openSourceIdx === null) return
+    if (openGroup === null) return
     const raf = requestAnimationFrame(() => {
       sourcePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
     return () => cancelAnimationFrame(raf)
-  }, [openSourceIdx])
+  }, [openGroup])
   // Tap anywhere outside the open passage to dismiss it. The panel can block the
   // messages above it, so clicking away is the quickest way to get the view back.
   // Clicks on the panel itself (scrolling it) and on a citation chip (which owns
   // its own open/close toggle) are left alone so they don't fight this handler.
   useEffect(() => {
-    if (openSourceIdx === null) return
+    if (openGroup === null) return
     const onDocDown = (e: MouseEvent) => {
       const t = e.target as Element | null
       if (!t) return
       if (sourcePanelRef.current?.contains(t)) return
       if (t.closest?.('.citation-stamp')) return
-      setOpenSourceIdx(null)
+      setOpenGroup(null)
     }
     document.addEventListener('mousedown', onDocDown)
     return () => document.removeEventListener('mousedown', onDocDown)
-  }, [openSourceIdx])
+  }, [openGroup])
   useEffect(() => {
     if (downOpen) downTextareaRef.current?.focus()
   }, [downOpen])
@@ -1910,36 +2102,88 @@ const MessageBubble = memo(function MessageBubble({
       {/* expanded source passage — rendered ABOVE the chip row so it grows
           upward. On the bottom message that keeps the passage comfortably in
           view instead of opening down under the composer. */}
-      {message.done && openSourceIdx !== null && message.sources?.[openSourceIdx]?.snippet && (
-        <div ref={sourcePanelRef} className="fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
-          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-            Source passage
-          </p>
+      {message.done && activePassage?.snippet && (
+        // .source-panel: on the dark tool surface globals.css swaps the flat
+        // card + light-page shadow for the composer's frosted-glass look
+        <div ref={sourcePanelRef} className="source-panel fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+              Source passage
+            </p>
+            {/* pager: only when this document contributed more than one cited
+                passage — steps through them 1/N without leaving the answer */}
+            {activeGroup && activeGroup.items.length > 1 && (
+              <div className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => setPageInGroup((p) => Math.max(0, p - 1))}
+                  disabled={pageInGroup === 0}
+                  aria-label="Previous passage"
+                  className="rounded p-0.5 transition hover:text-foreground disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <span className="tabular-nums">
+                  {pageInGroup + 1}/{activeGroup.items.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPageInGroup((p) => Math.min(activeGroup.items.length - 1, p + 1))}
+                  disabled={pageInGroup >= activeGroup.items.length - 1}
+                  aria-label="Next passage"
+                  className="rounded p-0.5 transition hover:text-foreground disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
           <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
-            {message.sources[openSourceIdx].snippet}
+            <HighlightedSnippet snippet={activePassage.snippet} answer={message.text} />
           </p>
+          {activePassage.page && (
+            <p className="mt-1.5 font-mono text-[10px] text-muted-foreground/70">
+              {activeGroup?.file} · p. {activePassage.page}
+            </p>
+          )}
         </div>
       )}
 
       {/* meta row: source chips (click or hover to see the passage) · timestamp · copy-on-hover */}
       {message.done && (
         <div className="flex flex-wrap items-center gap-2">
-          {message.sources && message.sources.length > 0 ? (
-            message.sources.map((s, i) => (
-              <button
-                key={`${s.file}-${s.page}`}
-                type="button"
-                onClick={() => setOpenSourceIdx((cur) => (cur === i ? null : i))}
-                aria-expanded={openSourceIdx === i}
-                title="See the exact passage"
-                className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {s.page ? `${s.file} · Page ${s.page}` : s.file}
-              </button>
-            ))
+          {sourceGroups.length > 0 ? (
+            sourceGroups.map((g, gi) => {
+              const first = g.items[0]
+              const extra = g.items.length - 1 // pages that collapse into "+N"
+              return (
+                <button
+                  key={g.file}
+                  type="button"
+                  // toggle this group's panel; always reset to its first (most
+                  // relevant) passage when (re)opening
+                  onClick={() => {
+                    setOpenGroup((cur) => (cur === gi ? null : gi))
+                    setPageInGroup(0)
+                  }}
+                  aria-expanded={openGroup === gi}
+                  title={extra > 0 ? `See ${g.items.length} cited passages from this document` : 'See the exact passage'}
+                  className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {first.page ? `${g.file} · p. ${first.page}` : g.file}
+                  {extra > 0 && (
+                    <span className="font-semibold opacity-70">+{extra}</span>
+                  )}
+                </button>
+              )
+            })
           ) : (
             message.grounded === false && (
               <span
@@ -1956,7 +2200,7 @@ const MessageBubble = memo(function MessageBubble({
           )}
 
           {message.ts && (
-            <span className="font-mono text-[11px] text-muted-foreground/70">
+            <span className="font-mono text-[11px] text-muted-foreground/40">
               {formatTime(message.ts)}
             </span>
           )}

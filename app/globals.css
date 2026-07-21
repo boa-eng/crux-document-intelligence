@@ -342,8 +342,14 @@
   --tool-fg: #F2EDE6;
   --tool-fg-muted: #A89F93;
   --accent-bright: color-mix(in srgb, var(--accent) 60%, white);
-  --teal-bright: color-mix(in srgb, var(--teal) 55%, white);
-  --warn-bright: color-mix(in srgb, var(--warn) 60%, white);
+  /* teal/warn brights are mixed from the LITERAL root values, not var(--teal)/
+     var(--warn). Why: --teal is re-pointed at --teal-bright a few lines down,
+     so deriving the bright from var(--teal) in the same scope is a circular
+     reference — the browser throws BOTH away and every teal/warn (the "Source
+     passage" label, file-chip icons, warn messages) collapsed to near-black
+     on the ink. Keep these in sync with the :root values above. */
+  --teal-bright: color-mix(in srgb, #3F7A6B 55%, white);
+  --warn-bright: color-mix(in srgb, #B23A2E 60%, white);
 
   --foreground: var(--tool-fg);
   --card: var(--tool-surface);
@@ -380,9 +386,31 @@
   );
 }
 
-/* user bubble — an accent-tinted dark surface, not a flat solid fill */
+/* user message — a glass pill, not a solid fill. This is where the glass
+   material earns its keep on the chat: a near-invisible warm-white fill (0.05–
+   0.09, well under the milky-fog range) with the blur + saturate doing the
+   work, plus an edge-lit top rim (the inset white highlight) so it reads as a
+   lit pane of glass floating over the ink. NO heavy accent fill — alignment
+   (right) and this material are what mark it as the user's turn. The JSX still
+   carries bg-accent/text-accent-foreground; we override the fill here (same
+   pattern the rest of .tool-dark uses) and keep the near-white text, which
+   stays high-contrast on the dark pill. */
 .tool-dark .tool-bubble {
-  background: color-mix(in srgb, var(--accent) 45%, var(--tool-surface));
+  background: linear-gradient(
+    rgba(255, 250, 245, 0.09),
+    rgba(255, 250, 245, 0.05)
+  );
+  border: 1px solid var(--tool-border-strong);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+/* no-blur fallback: a solid warm surface so the pill never turns into a flat
+   low-opacity grey smear where backdrop-filter is unsupported */
+@supports not (backdrop-filter: blur(1px)) {
+  .tool-dark .tool-bubble {
+    background: rgba(48, 42, 38, 0.96);
+  }
 }
 
 /* citation chips: dark glass pills that glow, replacing the flat teal pill
@@ -437,6 +465,35 @@
   background-color: rgba(0, 0, 0, 0.5);
 }
 
+/* expanded "Source passage" panel — give it the same frosted-glass family as
+   the composer instead of a flat card. Its Tailwind shadow-lg was tuned for a
+   light page; on the ink it read as a grey smear, so a deeper, softer black
+   drop replaces it and a brighter border does the "lifted pane" work. */
+.tool-dark .source-panel {
+  background: var(--tool-glass);
+  border-color: var(--tool-border-strong);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+}
+
+/* the run of the passage that most overlaps the answer text — the trust signal.
+   A subtle accent wash (not neon) so the eye lands on the exact sentence the
+   claim was drawn from, the way Perplexity underlines the cited snippet. */
+.tool-dark .crux-hl {
+  background: color-mix(in srgb, var(--accent-bright) 18%, transparent);
+  border-radius: 3px;
+  padding: 0 1px;
+  color: inherit;
+}
+
+/* keyboard focus rings use ring-accent/40 — the solid burgundy accent nearly
+   vanishes on the ink, so lift the ring to the bright accent at the same 40%
+   alpha. Targets the exact utility tool.tsx already uses; no markup changes. */
+.tool-dark .focus-visible\:ring-accent\/40:focus-visible {
+  --tw-ring-color: color-mix(in srgb, var(--accent-bright) 40%, transparent);
+}
+
 /* ============================================
    REDUCED MOTION
    ============================================ */
@@ -454,5 +511,10 @@
   .fade-up {
     opacity: 1 !important;
     transform: none !important;
+  }
+  /* the streaming caret is a motion affordance; with no blink it's just a
+     stray bar, so remove it entirely for reduced-motion users */
+  .stream-caret {
+    display: none;
   }
 }
