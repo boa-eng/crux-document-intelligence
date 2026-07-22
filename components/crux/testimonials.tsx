@@ -23,7 +23,7 @@ const ITEMS = [
 export function Testimonials() {
   const { ref, visible } = useReveal<HTMLDivElement>()
   return (
-    <section className="px-6 py-24">
+    <section className="section-seam px-6 py-24">
       <div ref={ref} className={`mx-auto max-w-5xl reveal ${visible ? 'is-visible' : ''}`}>
         <p className="text-center font-mono text-xs tracking-[0.25em] text-muted-foreground">
           TRUSTED BY TEAMS WHO CAN&apos;T AFFORD WRONG ANSWERS
@@ -34,7 +34,9 @@ export function Testimonials() {
               key={t.author}
               // inset top highlight: the page-wide lit-from-above edge, shared
               // with the why-crux and pricing cards. Opaque fill, no glow.
-              className="flex flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors duration-200 hover:border-accent/40"
+              // Hover "switches on": hairline 8% → 20% white + top-light
+              // 6% → 12%, 150ms. No translate/scale/shadow-grow.
+              className="flex flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-[border-color,box-shadow] duration-150 hover:border-white/20 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
             >
               {/* rating stars: a muted signal, not another accent surface —
                   burgundy stays reserved for the primary CTA and active states */}

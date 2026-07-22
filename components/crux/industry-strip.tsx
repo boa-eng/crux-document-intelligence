@@ -14,7 +14,9 @@ const INDUSTRIES = [
 
 export function IndustryStrip() {
   return (
-    <section className="px-6 pb-16">
+    // section-seam closes the stats+industry compact band as ONE unit — the
+    // seam sits after the pills, never between stats and this strip
+    <section className="section-seam px-6 pb-16">
       {/* max-w-4xl (not 3xl): seven pills need ~800px, so the wider rail keeps
           them on one line at desktop instead of orphaning the last pill. */}
       <ul className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-2">

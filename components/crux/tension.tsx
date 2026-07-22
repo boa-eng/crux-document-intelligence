@@ -12,13 +12,17 @@ export function Tension() {
   const { ref, visible } = useReveal<HTMLDivElement>(0.2)
 
   return (
-    <section className="px-6 py-28 md:py-40">
+    <section className="section-seam px-6 py-28 md:py-40">
       <div ref={ref} className="mx-auto max-w-4xl text-center">
         <h2 className="font-heading font-extrabold leading-[1.15] tracking-tight text-balance" style={{ fontSize: 'clamp(36px, 5vw, 56px)' }}>
           {LINES.map((line, i) => (
             <span
               key={line}
-              className="block transition-all duration-700"
+              // two-tone treatment (text unchanged): the two setup lines sit
+              // muted, the closing line lands bright — muted-first hierarchy
+              className={`block transition-all duration-700 ${
+                i < LINES.length - 1 ? 'text-muted-foreground' : 'text-foreground'
+              }`}
               style={{
                 opacity: visible ? 1 : 0,
                 transform: visible ? 'translateY(0)' : 'translateY(16px)',

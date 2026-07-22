@@ -50,7 +50,7 @@ function Step({ step }: { step: (typeof STEPS)[number] }) {
 
 export function Process() {
   return (
-    <section className="px-6 py-24">
+    <section className="section-seam px-6 py-24">
       <div className="mx-auto flex max-w-3xl flex-col gap-16">
         {STEPS.map((s) => (
           <Step key={s.n} step={s} />

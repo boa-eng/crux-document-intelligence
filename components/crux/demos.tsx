@@ -55,7 +55,7 @@ export function Demos() {
     active === 'All' ? DEMOS : DEMOS.filter((d) => d.industry === active)
 
   return (
-    <section className="px-6 py-24">
+    <section className="section-seam section-band px-6 py-24">
       <div ref={ref} className={`mx-auto max-w-5xl reveal ${visible ? 'is-visible' : ''}`}>
         <p className="text-center font-mono text-xs tracking-[0.25em] text-muted-foreground">
           SEE IT IN ACTION
@@ -93,7 +93,9 @@ export function Demos() {
           {filtered.map((d) => (
             <div
               key={d.tag}
-              className="fade-in group flex h-full flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors duration-200 hover:border-accent/40"
+              // site-wide card hover ("switch on"): hairline 8% → 20% white +
+              // top-light 6% → 12%, 150ms. No translate/scale/shadow-grow.
+              className="fade-in group flex h-full flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-[border-color,box-shadow] duration-150 hover:border-white/20 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]"
             >
               {/* category tag: a hairline label, not another accent fill — burgundy
                   stays reserved for the primary CTA and active states */}

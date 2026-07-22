@@ -84,6 +84,20 @@
   --tw-ring-color: color-mix(in srgb, var(--accent-bright) 40%, transparent);
 }
 
+/* Full-bleed section seam: a 1px hairline drawn along the BOTTOM of a landing
+   section so long scrolls get quiet structural rhythm (the Supabase move).
+   Warm white at 7% — cooler pure-white lines read grey on the warm ink.
+   Applied on section roots; the hero and the tool slab are exempt because a
+   hard line under them fights the slab's shadow/glow. */
+.section-seam {
+  border-bottom: 1px solid rgba(255, 250, 245, 0.07);
+}
+/* Alternating band: a section sitting a breath (~2%) lighter than the page
+   base so the seams separate bands instead of floating on flat black. */
+.section-band {
+  background-color: rgba(255, 250, 245, 0.02);
+}
+
 @layer base {
   * {
     border-color: var(--border);

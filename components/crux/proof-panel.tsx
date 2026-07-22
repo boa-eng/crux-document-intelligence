@@ -23,7 +23,7 @@ export function ProofPanel() {
   const { ref, visible } = useReveal<HTMLDivElement>(0.35)
 
   return (
-    <section className="px-6 py-24">
+    <section className="section-seam px-6 py-24">
       <div
         ref={ref}
         className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-border bg-card"
@@ -37,9 +37,9 @@ export function ProofPanel() {
 
             <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance md:text-4xl">
               {/* two-tone treatment: text unchanged, just split at the
-                  natural phrase break */}
-              <span className="text-foreground">Every answer </span>
-              <span className="text-muted-foreground">shows its source.</span>
+                  natural phrase break — opening muted, payoff bright */}
+              <span className="text-muted-foreground">Every answer </span>
+              <span className="text-foreground">shows its source.</span>
             </h2>
 
             <div className="flex flex-wrap gap-2">

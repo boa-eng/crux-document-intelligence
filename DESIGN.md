@@ -321,6 +321,47 @@ one of them is wrong.
   message (removed after; confirmed via git diff). No copy strings changed
   anywhere in this pass.
 
+## Working notes — Supabase quick-wins pass (2026-07-22, fourth pass)
+
+- **Two-tone headline rule (now the page law): muted opening, bright payoff.**
+  Section h2s split at their natural phrase break render the FIRST clause in
+  `text-muted-foreground` and the SECOND (the payoff) in `text-foreground` —
+  hierarchy from color alone, zero extra elements. Flipped why-crux and
+  proof-panel (both were bright-first); tension's three stacked lines follow
+  the same law (two setup lines muted, closing line bright). Single-clause
+  headings with no natural split (pricing's "Two ways to run Crux.",
+  final-cta's "Don't take our word for it.") stay fully bright — never force
+  a split. Hero already had its own two-tone; untouched.
+- **Section seam token:** `.section-seam` = `border-bottom: 1px solid
+  rgba(255,250,245,0.07)` — warm white, NOT pure white (grey on warm ink).
+  Applied on section roots: tension, industry-strip (closing the
+  stats+industry band as one unit), demos, process, why-crux, proof-panel,
+  testimonials, pricing-anatomy. Exempt: hero + tool (a hard line fights the
+  slab's specular ring/shadow), trust-strip (has its own border-y), final-cta
+  (the footer's border-t already draws that boundary). `.section-band` =
+  `background-color: rgba(255,250,245,0.02)`, currently on demos only — one
+  lighter band per scroll is enough rhythm.
+- **Card hover recipe ("switch on"), one voice site-wide:** rest = hairline
+  `--border` (8% white) + `inset 0 1px 0 white/6`; hover = border →
+  `white/20` + inset top-light → `white/12`. `transition-[border-color,
+  box-shadow] duration-150`, Tailwind default ease. NO translate, scale,
+  shadow-grow, or spotlight. Favored cards (why-crux Crux, pricing Teams)
+  keep their static `-translate-y-1.5` lift (positioning, not hover) and
+  their drop shadow verbatim; their hover brightens the accent rim one step
+  (45% → 65% accent-bright) plus the same top-light bump. Replaced the old
+  `hover:border-accent/40 transition-colors duration-200` on demos +
+  testimonial cards. Widget citation chips / tool-chips keep their own hover
+  language — untouched.
+- **Trust-strip two-weight:** claims in `text-foreground`, natural trailing
+  qualifiers muted ("Deleted" bright / "on close" muted, "NDA" bright /
+  "on request" muted); items with no natural split ("Processed in memory",
+  "Open-source engine", "Self-hostable") stay all-bright. Separators (·) at
+  `text-muted-foreground/60`. Rendered strings byte-identical to before.
+- **Stale-CSS trap confirmed again this pass:** the new `.section-seam` /
+  `.section-band` rules compiled only after a second real content edit to
+  globals.css + a page reload — verify new classes via
+  `getComputedStyle` before debugging selectors.
+
 ---
 
 # Part 2 — Liquid-glass material research (Apple HIG / WWDC25, CSS craft, Linear/Raycast/Vercel)

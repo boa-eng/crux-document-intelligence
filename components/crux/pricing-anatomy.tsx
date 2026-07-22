@@ -23,7 +23,7 @@ const TIERS = [
 export function PricingAnatomy() {
   const { ref, visible } = useReveal<HTMLDivElement>()
   return (
-    <section className="px-6 py-24">
+    <section className="section-seam px-6 py-24">
       <div
         ref={ref}
         className={`mx-auto max-w-3xl text-center reveal ${visible ? 'is-visible' : ''}`}
@@ -40,8 +40,12 @@ export function PricingAnatomy() {
               key={tier.name}
               className={
                 tier.favored
-                  ? 'flex h-full flex-col rounded-2xl border border-[color-mix(in_srgb,var(--accent-bright)_45%,transparent)] bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_16px_40px_-20px_rgba(0,0,0,0.8)] sm:-translate-y-1.5'
-                  : 'flex h-full flex-col rounded-2xl border border-border bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+                  ? // static lift stays (positioning); hover only "switches
+                    // on": rim one step brighter + doubled top-light, 150ms
+                    'flex h-full flex-col rounded-2xl border border-[color-mix(in_srgb,var(--accent-bright)_45%,transparent)] bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_16px_40px_-20px_rgba(0,0,0,0.8)] transition-[border-color,box-shadow] duration-150 hover:border-[color-mix(in_srgb,var(--accent-bright)_65%,transparent)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_40px_-20px_rgba(0,0,0,0.8)] sm:-translate-y-1.5'
+                  : // site-wide card hover: hairline 8% → 20% white, top-light
+                    // 6% → 12%. No movement, no shadow growth.
+                    'flex h-full flex-col rounded-2xl border border-border bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-[border-color,box-shadow] duration-150 hover:border-white/20 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]'
               }
             >
               <h3
