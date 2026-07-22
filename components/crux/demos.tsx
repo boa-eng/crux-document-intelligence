@@ -82,8 +82,9 @@ export function Demos() {
           ))}
         </div>
 
-        {/* cards */}
-        <div className="mt-10 grid gap-5 md:grid-cols-3">
+        {/* cards — items-stretch + h-full flex-col so all three cards match
+            heights even when answer copy differs in length */}
+        <div className="mt-10 grid items-stretch gap-5 md:grid-cols-3">
           {filtered.length === 0 && (
             <p className="col-span-full text-center text-sm text-muted-foreground">
               More {active} demos coming soon.
@@ -92,7 +93,7 @@ export function Demos() {
           {filtered.map((d) => (
             <div
               key={d.tag}
-              className="fade-in group flex flex-col rounded-2xl border border-border bg-card p-6 transition-colors duration-200 hover:border-accent/40"
+              className="fade-in group flex h-full flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors duration-200 hover:border-accent/40"
             >
               {/* category tag: a hairline label, not another accent fill — burgundy
                   stays reserved for the primary CTA and active states */}
@@ -108,7 +109,12 @@ export function Demos() {
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 A: {d.a}
               </p>
-              <span className="mt-4 inline-flex w-fit items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-[11px] text-teal">
+              {/* mt-auto pins this whole footer block (source chip + link) to the
+                  card bottom, so both rows sit on one consistent line across
+                  cards no matter how long each answer runs; pt-4 keeps a fixed
+                  minimum gap to the answer text on the tallest card */}
+              <div className="mt-auto flex flex-col items-start pt-4">
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-[11px] text-teal">
                 <svg
                   className="h-3 w-3"
                   viewBox="0 0 24 24"
@@ -127,10 +133,11 @@ export function Demos() {
               <button
                 type="button"
                 onClick={loadDemo}
-                className="mt-5 text-sm font-semibold text-accent transition-colors hover:text-accent-glow"
+                className="mt-4 text-sm font-semibold text-accent transition-colors hover:text-accent-glow"
               >
                 Try a demo like this →
               </button>
+              </div>
             </div>
           ))}
         </div>

@@ -137,6 +137,190 @@ one of them is wrong.
   plain-assistant screenshots were taken against a temporary in-`useState` mock
   message (removed after; confirmed via git diff).
 
+## Working notes — motion polish + dark landing pass (2026-07-22)
+
+- **Popover exit motion (the Esc fix).** React unmounts a panel the instant its
+  state clears, so closes were a light switch. `useDelayedUnmount(open, ms=180)`
+  in `tool.tsx` fixes this: when `open` flips false the element stays `mounted`
+  for the CSS exit's length with `closing: true`, and the caller swaps
+  `.popover-in` → `.popover-out` (globals.css: enter = 200ms ease-out fade +
+  6px rise + scale-from-0.98; exit = 170ms ease-in fade + 5px drift down +
+  scale-to-0.98, macOS-popover style, with `pointer-events: none` so a closing
+  panel can't eat clicks). Because every close path (Esc, click-outside, chip
+  re-click) only ever sets the open state, they ALL route through the animation
+  with no per-path work. Reduced-motion users get a 0ms timeout — instant
+  unmount, exactly the old behavior. Wired to the source-passage panel and the
+  downvote "what went wrong" popover; the panel latches its last open group in
+  a ref (`renderGroup`) so the closing pane keeps its content instead of going
+  blank mid-fade. The click-away scrim under the downvote popover renders only
+  while truly open, never during the closing phase.
+- **Hover feel.** `.citation-stamp`, `.source-panel`, and a new `.tool-chip`
+  hook (header buttons + empty-state suggestion chips) transition background/
+  border/box-shadow/color together at 150ms ease-out so no property snaps.
+  Hovers brighten fill/edge only — blur never changes. The `.tool-chip` hover
+  fill is mixed FROM `--tool-surface` (91% surface / 9% white), not a
+  translucent white, because the suggestion chips already sit on a surface
+  fill and a 5% white overlay landed on the same color (invisible hover).
+  Panel scrollbar was already correct via `color-scheme: dark` — untouched.
+- **Dark landing: scope decision = promote the ink palette to `:root`** (this
+  branch only), NOT a `.page-dark` wrapper. Every landing component already
+  reads the semantic tokens, so one `:root` block flips the whole page;
+  `.tool-dark` still re-points the same tokens inside the widget so its tuned
+  values keep winning. Page base `#141110` sits a step darker than the widget
+  slab `#191512` so the tool reads lifted, and `.tool-card` gained an inset
+  top rim (1px white @ 6%) because a black drop shadow alone can't separate
+  ink from ink. Root-level `.text-accent` / `hover:border-accent/40` /
+  `ring-accent/40` lifts mirror the `.tool-dark` ones (solid burgundy on ink
+  is ~2:1); `--teal`/`--warn` are bright-mixed at root FROM LITERALS (the
+  circularity trap note still applies). `--accent` untouched: still the solid
+  CTA fill.
+- **Backdrop depth:** `.crux-bg` carries two static radial glows (accent-bright
+  9% top-left under the hero, teal 7% mid-right by the tool) so the glass has
+  something to refract; the grain overlay flipped `multiply` → `screen` (grain
+  must add light on ink) and the dot grid flipped to light dots. No looping
+  animation anywhere. `.glass` (sticky bar) is now dark frost: rgba(25,21,18,.6)
+  + blur(16px) saturate(160%) + inset top rim, with a solid-ink
+  `@supports not (backdrop-filter)` fallback.
+- **One-off retunes:** ProofPanel's spotlight went from cool `#1A1D21` (its
+  contrast came from the paper page) to a warm LIGHTER-than-card `#26201A` so
+  it still reads as a spotlight on ink; `layout.tsx` viewport colorScheme/
+  themeColor now dark. All copy strings untouched; reveal/fade-up animations
+  untouched. Contrast on the new base: `--foreground` ~15:1, `--muted-
+  foreground` ~7.3:1 on bg / ~6.6:1 on card, `--accent-bright` ~5.8:1 — all
+  clear of the 4.5:1 floor. On `main` none of this exists; nothing here is
+  shared beyond this branch's globals.css/layout/proof-panel edits.
+
+## Working notes — depth finish + conversion sections (2026-07-22, second pass)
+
+- **Background presence fixed by roughly doubling the glows.** The 9%/7%
+  radials read as flat black at normal brightness (the exact glass-over-flat
+  anti-pattern). Now: accent 18% at 16%/8% (70rem), teal 14% at 92%/42%
+  (72rem), plus a NEW third warm ember (#B2762E at 8%) low-center under the
+  CTA. Still soft 70% falloff, still static. If a future pass thinks these are
+  loud, check at laptop brightness before dimming: at 9% they were invisible.
+- **`.tool-card` slab now separates three ways:** fill stepped up to `#1b1713`
+  (page base #141110, old slab token #191512 — the `--tool-bg` token itself is
+  UNCHANGED and still feeds nothing else, the slab uses the literal); top rim
+  raised to 12% white; and a `0 0 0 1px rgba(255,255,255,0.06)` spread shadow
+  acts as the outer border-light. Deliberately a box-shadow ring, NOT a
+  border-color override: the dragOver state swaps the element's real border to
+  `border-accent`, and an unlayered `.tool-card { border-color }` rule in
+  globals.css would beat that utility and kill the drag affordance.
+- **Empty-state dropzone got a real zone** (tool.tsx): the icon + "Drop a
+  document here" + privacy line now sit inside a dashed
+  `--tool-border-strong` hairline with a 3% foreground fill lift. Instruction
+  line lifted muted→`text-foreground/90` font-medium; privacy line to full
+  muted (was /80); suggestion chips to `text-foreground/80`. This is the one
+  place the "layout untouched" rule flexed: a wrapper div around three
+  existing empty-state elements, nothing else moved.
+- **New conversion sections, all opaque ink (glass stays on tool chrome):**
+  `why-crux.tsx` reworked into the 3-column category-defense grid (Ctrl+F /
+  Chatbots / Crux; Crux favored via accent-bright 45% rim + `-translate-y-1.5`
+  + deep drop); `stats.tsx` now carries the three MEASURED numbers (15/15
+  dangote battery, 3 standards in the API 570/510 run, 0 uncited answers) in a
+  3-col grid; `industry-strip.tsx` (new, after Stats) is a non-interactive
+  mono pill row; `pricing-anatomy.tsx` (new, before FinalCta) is the
+  two-card fee anatomy with zero prices, Teams favored with the same rim
+  treatment as the Crux column so "favored" has one visual voice site-wide.
+  `final-cta.tsx` gained three teal-check risk-reversal rows under the button;
+  the pre-existing mono line below them is byte-identical per the copy freeze,
+  so "No account" now appears twice in that section — flagged, not fixed.
+- No mock message state was needed this pass; the tool widget's internals are
+  untouched beyond the empty-state block. Zero backend calls made.
+
+## Working notes — fix pass 2: dedupe + alignment + glass amplification (2026-07-22)
+
+- **CRITICAL COMPILER TRAP (root-caused this pass): the CSS pipeline
+  (Tailwind v4 / Lightning CSS under Turbopack) folds a
+  `backdrop-filter` + `-webkit-backdrop-filter` pair into ONE logical
+  declaration and emits only the LAST-written form.** Every glass rule in
+  globals.css was written standard-first / -webkit-second, so the compiled CSS
+  contained ONLY `-webkit-backdrop-filter` — which desktop Chrome ignores.
+  All blur on the site (sticky bar, composer, user pill, citation chips,
+  source panel) was silently dead in Chrome; the "glass" was just low-alpha
+  fills. Fix: always write `-webkit-backdrop-filter` FIRST and the standard
+  `backdrop-filter` LAST (the order Tailwind's own utilities use — both then
+  survive). Writing only the standard property does NOT work either; the
+  compiler rewrites it to -webkit-only. Verified by curling the compiled
+  chunk and reading `getComputedStyle(...).backdropFilter` at runtime.
+- **Sticky bar amplified into the real macOS moment:** fill is now a
+  top-heavy gradient (rgba(20,17,14) 0.7 → 0.3) instead of the near-solid
+  0.6 flat — the darker top IS the text-contrast dim layer (wordmark/CTA sit
+  there), while the thinner bottom half lets scrolling content visibly ghost
+  through blur(20px) saturate(180%). Second inset rim added along the BOTTOM
+  edge (the edge content slides beneath) alongside the top specular.
+- **Slab specular ring:** `.tool-card::before` = the pass-1 masked-ring
+  recipe (1px padding, xor mask), gradient 22% white at top → 2% at bottom,
+  so the slab reads as a pane lit from above. Drawn as an overlay ring, NOT
+  the element border, so the dragOver `border-accent` swap underneath still
+  works; `pointer-events: none` so drag/drop events pass through.
+  `.tool-card` gained `position: relative` to anchor it.
+- **Lit-from-above vocabulary on content cards:** why-crux / pricing /
+  testimonials cards each got `inset 0 1px 0 rgba(255,255,255,0.06)` folded
+  into their Tailwind shadow utilities (kept in TSX, not a CSS class — a
+  plain-class box-shadow would fight the arbitrary shadow utilities on the
+  favored cards). Opaque fills, no blur, no glow, per the glass-on-chrome rule.
+- **Alignment pass:** why-crux + pricing cards are `flex h-full flex-col` in
+  `items-stretch` grids (equal heights); why-crux headings sit in a
+  min-h-[1.75rem] row so one-liners start at one y. Stats labels got
+  `min-h-[2lh] text-balance` so 2-line and 3-line labels occupy one box.
+  Final-CTA check rows: `w-fit mx-auto items-start` — group stays centered,
+  checkmarks stack in one vertical line. "Pricing on request." moved mt-8→10.
+  The favored cards keep their deliberate `-translate-y-1.5` lift, so their
+  content sits 6px high by design — that offset is the "favored" voice, not
+  a misalignment.
+- **Copy changes (user-approved):** the duplicate final-CTA mono line ("NO
+  ACCOUNT. NOTHING STORED...") is DELETED — the check rows carry that message
+  now. Industry strip gained 'Medical' (7 pills) and widened its rail to
+  max-w-4xl so all seven sit on one desktop line (3xl orphaned the last pill);
+  wraps 2/3/2 centered at 390px.
+- Screenshots via Playwright MCP (it was up this session; no driver daemon
+  needed). Playwright's cwd is the rag-demo parent dir, so `filename:` saves
+  land there — move them out so they don't pollute the repo.
+
+## Working notes — typography rhythm + composer-as-hero pass (2026-07-22, third pass)
+
+- **Chosen type scale (now the page law).** Section h2 = `font-heading
+  text-3xl md:text-4xl font-bold leading-tight tracking-tight` (why-crux,
+  proof-panel, pricing — proof-panel was missing the md:text-4xl step and got
+  it). Deliberate exceptions that stay: tension (clamp 36–56 extrabold) and
+  final-cta (text-4xl md:text-5xl extrabold) are the two emotional beats;
+  hero h1 is the one 7xl. Mono kickers = `text-xs tracking-[0.25em]
+  text-muted-foreground` (demos, testimonials). Card-title voice = ONE recipe
+  everywhere: `font-heading text-lg font-bold tracking-tight` in a
+  `min-h-[1.75rem]` row, body `mt-2 text-sm leading-relaxed muted` —
+  pricing-anatomy was text-xl/p-7/mt-3 and is now normalized to the why-crux
+  values (text-lg/p-6/mt-2). Card container recipe: `rounded-2xl p-6` +
+  hairline + `inset 0 1px 0 white/6` lit-rim (why-crux + pricing were
+  rounded-xl; demos was missing the rim — all aligned now). Section padding
+  rhythm: `py-24` standard; py-28/40 tension + py-28 final-cta (beats),
+  stats py-16 + industry pb-16 (one compact band), trust py-6 / footer py-12
+  (bands). Rails: text sections 3xl/4xl, 3-col grids 5xl; proof-panel's odd
+  `max-w-[1050px]` snapped to max-w-5xl.
+- **Demo cards equal-height fix:** grid is `items-stretch`, each card
+  `flex h-full flex-col`, and the source chip + "Try a demo like this" link
+  live in one `mt-auto pt-4` footer block — so chips sit on one line and
+  links on one baseline across all three cards regardless of answer length.
+- **Composer chip structure (Copilot-style):** the document-aware suggestion
+  chips moved INSIDE `.tool-composer`, as a `flex-wrap` row between the
+  attached-file pills and the textarea (capped `max-h-[4.5rem] overflow-hidden`
+  = two rows max). Six prompts (Summarize / key figures / compare-when->1-file /
+  find-a-number-in-a-table / what's-missing / explain-hardest-simply), same
+  `tool-chip` styling, same `editMessage` fill-on-click. They render only while
+  `composerCentered` (doc uploaded, nothing sent), so they vanish with the
+  first message — the old below-composer row is deleted. Empty-state hero
+  treatment: centered slot gets `self-stretch md:-mx-2` (a touch wider than
+  the message column), composer padding steps up `px-4 pb-3 pt-4`, textarea
+  floors at `min-h-[76px]` (~3 lines). All of it keys off the existing
+  `composerCentered` flag on the ONE composer instance, so the dock
+  transition (compact px-3/pt-3, one-line input) is untouched.
+- **Input niceties + highlight:** textarea now carries `spellCheck` /
+  `autoCorrect="on"` / `autoCapitalize="sentences"` (native only, no LLM).
+  `.crux-hl` strengthened: wash 18%→30% accent-bright, `font-weight: 600`,
+  text pinned to `--tool-fg` — verified in the panel against a temporary mock
+  message (removed after; confirmed via git diff). No copy strings changed
+  anywhere in this pass.
+
 ---
 
 # Part 2 — Liquid-glass material research (Apple HIG / WWDC25, CSS craft, Linear/Raycast/Vercel)

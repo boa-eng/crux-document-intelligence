@@ -10,6 +10,8 @@ import { ProofPanel } from '@/components/crux/proof-panel'
 import { WhyCrux } from '@/components/crux/why-crux'
 import { Testimonials } from '@/components/crux/testimonials'
 import { TrustStrip } from '@/components/crux/trust-strip'
+import { IndustryStrip } from '@/components/crux/industry-strip'
+import { PricingAnatomy } from '@/components/crux/pricing-anatomy'
 import { FinalCta } from '@/components/crux/final-cta'
 import { Footer } from '@/components/crux/footer'
 
@@ -23,12 +25,14 @@ export default function Page() {
         <Tool />
         <Tension />
         <Stats />
+        <IndustryStrip />
         <Demos />
         <Process />
         <WhyCrux />
         <ProofPanel />
         <Testimonials />
         <TrustStrip />
+        <PricingAnatomy />
         <FinalCta />
         <Footer />
       </main>

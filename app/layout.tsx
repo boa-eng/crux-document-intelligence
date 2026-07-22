@@ -29,8 +29,10 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light',
-  themeColor: '#F5F3EE',
+  // dark-glass branch: browser chrome (mobile address bar, form controls)
+  // should match the ink page, not the old paper
+  colorScheme: 'dark',
+  themeColor: '#141110',
   userScalable: true,
 }
 

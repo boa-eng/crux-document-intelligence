@@ -26,7 +26,7 @@ export function ProofPanel() {
     <section className="px-6 py-24">
       <div
         ref={ref}
-        className="mx-auto max-w-[1050px] overflow-hidden rounded-2xl border border-border bg-card"
+        className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-border bg-card"
       >
         <div className="grid md:grid-cols-2">
           {/* LEFT — paper column */}
@@ -35,7 +35,7 @@ export function ProofPanel() {
               Proof, not promises
             </span>
 
-            <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance">
+            <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance md:text-4xl">
               {/* two-tone treatment: text unchanged, just split at the
                   natural phrase break */}
               <span className="text-foreground">Every answer </span>
@@ -60,11 +60,13 @@ export function ProofPanel() {
             </button>
           </div>
 
-          {/* RIGHT — ink-dark spotlight panel: a static screenshot-like
-              exchange, not a live chat and not a theme toggle */}
+          {/* RIGHT — spotlight panel: a static screenshot-like exchange, not a
+              live chat. It used to be the page's one dark moment against paper;
+              now the whole page is ink, so it lifts a step LIGHTER and warmer
+              than the card around it to keep reading as a spotlight */}
           <div
             className="flex flex-col justify-center gap-5 p-8 md:p-12"
-            style={{ backgroundColor: '#1A1D21' }}
+            style={{ backgroundColor: '#26201A' }}
           >
             <p className="text-sm text-[#A8A29E]">
               What was the water table depth at borehole BH-06?
@@ -79,7 +81,7 @@ export function ProofPanel() {
               , recorded during drilling per the site investigation log.
             </p>
             <span
-              className={`w-fit rounded-full border border-[#3A3D42] px-3 py-1 font-mono text-xs text-[#A8A29E] ${
+              className={`w-fit rounded-full border border-[#4A423A] px-3 py-1 font-mono text-xs text-[#A8A29E] ${
                 visible ? 'citation-stamp' : 'opacity-0'
               }`}
             >

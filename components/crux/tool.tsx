@@ -104,6 +104,32 @@ type Message = {
   rating?: 'up' | 'down'
 }
 
+/** Delayed unmount for popovers and panels. React removes an element from the
+ *  DOM the instant its state clears, so a close can never animate — it just
+ *  vanishes, which feels like a light switch. This hook keeps the element
+ *  mounted a beat longer: when `open` flips false, `mounted` stays true for
+ *  `ms` (matching the CSS exit animation's length) while `closing` is true, so
+ *  the caller can swap in the .popover-out exit class; then the element really
+ *  unmounts. Every close path (Esc, click-outside, chip re-click) only ever
+ *  flips `open`, so they all route through the animation for free. Users with
+ *  prefers-reduced-motion get an instant unmount, exactly like before. */
+function useDelayedUnmount(open: boolean, ms = 180) {
+  const [mounted, setMounted] = useState(open)
+  const closing = mounted && !open
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      return
+    }
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const t = setTimeout(() => setMounted(false), reduce ? 0 : ms)
+    return () => clearTimeout(t)
+  }, [open, ms])
+  return { mounted, closing }
+}
+
 /** Serialize one stored message into the backend's history turn shape. Assistant
  *  turns carry their citation chip labels as `citations` so a follow-up like
  *  "which page did that come from?" lets the backend name the exact pages it
@@ -171,26 +197,41 @@ function buildGreeting(
   const dom = now.getDate() // 1-31, seeds daily rotation
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const day = days[dow]
-  const n = nameDone && name ? `, ${name}.` : '.'
+  const named = nameDone && !!name
 
-  let headline: string
+  // Claude.ai rotates by TIME of day, not just day of week ("Afternoon, X" at
+  // 1pm, "Evening, X" at 8pm) — so each hour band contributes its variants and
+  // the day-of-week special joins the pool rather than always winning. The pick
+  // rotates by (date + hour): stable while you look at it, different at lunch
+  // than at breakfast. Strings drawn from the documented Claude.ai greeting set,
+  // with Badru-approved replacements where the originals tried too hard.
+  let pool: string[]
   if (h >= 22 || h < 5) {
-    headline = nameDone && name ? `Night owl, ${name}.` : 'Still at it.'
+    pool = named ? ['Night owl', 'Still at it', 'Back at it'] : ['Hello, night owl', 'Still at it']
   } else if (h < 8) {
-    headline = nameDone && name ? `Up early, ${name}.` : 'Up early.'
-  } else if (dow === 5) {
-    // Friday: alternate variant by day-of-month parity
-    const v = dom % 2 === 0 ? 'Happy Friday' : 'That Friday feeling'
-    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
-  } else if (dow === 6) {
-    const v = dom % 2 === 0 ? 'Happy Saturday' : 'Weekend work'
-    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
-  } else if (dow === 0) {
-    const v = dom % 2 === 0 ? 'Happy Sunday' : 'Sunday reading'
-    headline = nameDone && name ? `${v}, ${name}.` : `${v}.`
+    pool = ['Up early', 'Good morning']
+  } else if (h < 12) {
+    pool = ['Good morning', 'Morning', 'Ready when you are']
+  } else if (h < 17) {
+    pool = ['Good afternoon', 'Afternoon']
   } else {
-    headline = `Happy ${day}${n}`
+    pool = ['Good evening', 'Evening']
   }
+  // Daytime only: the day-of-week special joins the rotation.
+  if (h >= 8 && h < 22) {
+    if (dow === 5) pool = pool.concat(['Happy Friday', 'Finish the week strong'])
+    else if (dow === 6) pool = pool.concat(['Happy Saturday', 'Weekend work', 'Welcome to the weekend'])
+    else if (dow === 0) pool = pool.concat(['Happy Sunday', 'Sunday session'])
+    else pool = pool.concat([`Happy ${day}`])
+    // Returning-user warmth, only meaningful once a name exists.
+    if (named) pool = pool.concat(['Back at it', "What's new"])
+  }
+
+  const v = pool[(dom + h) % pool.length]
+  // "What's new" is a question, so it closes with "?" — everything else is a
+  // statement and closes with "."; the name (when given) slots in before either.
+  const punct = v === "What's new" ? '?' : '.'
+  const headline = named ? `${v}, ${name}${punct}` : `${v}${punct}`
 
   return { headline, tagline: TAGLINES[dom % TAGLINES.length] }
 }
@@ -278,6 +319,10 @@ export function Tool() {
   const [name, setName] = useState('')
   const [nameDone, setNameDone] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
+  // toggles the inline name input that lives under the greeting (Option 1): a
+  // quiet "add your name" link until clicked, so the greeting personalizes itself
+  // ("Happy Wednesday, Badru.") instead of a stranded field at the bottom.
+  const [nameEditing, setNameEditing] = useState(false)
   // set after mount to avoid SSR/client hydration mismatch; re-runs when name is set
   const [greetingData, setGreetingData] = useState<{ headline: string; tagline: string }>({ headline: '', tagline: '' })
 
@@ -937,7 +982,13 @@ export function Tool() {
                 frosted background and accent-tinted inner glow; this element
                 still gets its shape/padding/focus-border from Tailwind. */}
             <div className="relative">
-              <div className="tool-composer relative rounded-2xl border border-border bg-card px-3 pb-2.5 pt-3 transition focus-within:border-accent">
+              {/* Centered empty state: the composer is the hero object (Copilot-
+                  style) — roomier padding and a taller input via the classes
+                  below. Docked mode keeps the compact recipe. Same element,
+                  same radius, so the dock transition never reshapes it. */}
+              <div className={`tool-composer relative rounded-2xl border border-border bg-card transition focus-within:border-accent ${
+                composerCentered ? 'px-4 pb-3 pt-4' : 'px-3 pb-2.5 pt-3'
+              }`}>
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1053,6 +1104,10 @@ export function Tool() {
                   value={input}
                   aria-label="Ask a question about your document"
                   rows={1}
+                  // native browser niceties only — no LLM autocomplete
+                  spellCheck={true}
+                  autoCorrect="on"
+                  autoCapitalize="sentences"
                   onChange={(e) => {
                     setInput(e.target.value)
                     e.target.style.height = 'auto'
@@ -1088,7 +1143,12 @@ export function Tool() {
                           ? 'Ask anything about your document…'
                           : 'Write a message…'
                   }
-                  className="max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+                  // centered mode floors the box at ~3 lines so the empty-state
+                  // composer reads as the product's main object; the JS auto-grow
+                  // still raises it beyond that, and docked mode stays one line
+                  className={`max-h-40 w-full resize-none bg-transparent px-1 pt-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 ${
+                    composerCentered ? 'min-h-[76px]' : ''
+                  }`}
                 />
 
                 {/* controls row: [+] on the left, mic · send on the right */}
@@ -1267,7 +1327,7 @@ export function Tool() {
                   <button
                     type="button"
                     onClick={openGaps}
-                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
+                    className="tool-chip flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-accent/50 hover:text-accent"
                   >
                     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
                       <circle cx="12" cy="12" r="9" />
@@ -1279,7 +1339,7 @@ export function Tool() {
                 <button
                   type="button"
                   onClick={clearSession}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
+                  className="tool-chip flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-warn/50 hover:text-warn"
                 >
                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
                     <path
@@ -1378,50 +1438,87 @@ export function Tool() {
                   </p>
                 )}
 
+                {/* Name affordance, folded into the greeting (Option 1): a quiet
+                    "add your name" link that reveals a small inline input; once
+                    set, buildGreeting personalizes the headline itself and this
+                    disappears. Optional and non-blocking — never gates using Crux. */}
+                {!nameDone && !nameEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setNameEditing(true)}
+                    className="text-xs text-muted-foreground/70 underline decoration-dotted underline-offset-4 transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    add your name
+                  </button>
+                )}
+                {!nameDone && nameEditing && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const n = nameDraft.trim()
+                      if (n) {
+                        setName(n)
+                        setNameDone(true)
+                      }
+                      setNameEditing(false)
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onBlur={() => setNameEditing(false)}
+                      placeholder="Your name, then Enter"
+                      className="w-52 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:outline-none"
+                    />
+                  </form>
+                )}
+
                 {!hasDocs && (
-                  <>
-                    <svg className="h-7 w-7 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+                  /* the drop invitation gets its own visible zone: a dashed
+                     hairline + faint fill lift so it reads as a real target,
+                     not a whisper lost on the ink. Text lifted from muted to
+                     near-full foreground — this line is the widget's only
+                     instruction, so it must be the first thing legible. */
+                  <div className="mt-1 flex flex-col items-center gap-2 rounded-xl border border-dashed border-[var(--tool-border-strong)] bg-foreground/[0.03] px-8 py-5">
+                    <svg className="h-7 w-7 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm font-medium text-foreground/90">
                       Drop a document here, or just start typing.
                     </p>
-                    <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground/80">
+                    <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
                       <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <rect x="5" y="11" width="14" height="9" rx="2" strokeLinecap="round" strokeLinejoin="round" />
                         <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                       Read in memory · never stored
                     </p>
-                  </>
+                  </div>
                 )}
 
-                {/* Centered composer slot (empty state with a document): the ONE
-                    composerBox instance renders here instead of the docked slot
-                    below. text-left undoes the empty state's text-center so the
-                    textarea and its chips read normally. */}
+                {/* document-aware suggestion chips — an empty-state device that
+                    lives in the CHAT AREA (where questions and answers appear),
+                    not inside the composer: cramming them between the file pills
+                    and the textarea made the input feel cluttered. Centered like
+                    Copilot's open-space chips; clicking one fills the composer
+                    via editMessage; they vanish once the first message exists. */}
                 {composerCentered && (
-                  <div className="mt-3 w-full text-left">{composerBox}</div>
-                )}
-
-                {/* document-aware suggestion chips — an empty-state device only
-                    (they never appear once the conversation starts). Clicking one
-                    fills the composer via editMessage so the user can send or edit
-                    it, matching Gemini/ChatGPT's opening screen. Shown only once a
-                    document exists, since every suggestion is about that document. */}
-                {hasDocs && (
-                  <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                  <div className="mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
                     {[
                       files.length > 1 ? 'Summarize these documents' : 'Summarize this document',
                       'What are the key figures?',
                       ...(files.length > 1 ? ['Compare the uploaded files'] : []),
+                      'Find a number buried in a table',
+                      "What's missing from this document?",
+                      'Explain the hardest section simply',
                     ].map((chip) => (
                       <button
                         key={chip}
                         type="button"
                         onClick={() => editMessage(chip)}
-                        className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted-foreground transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        className="tool-chip rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-foreground/80 transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                       >
                         {chip}
                       </button>
@@ -1429,26 +1526,16 @@ export function Tool() {
                   </div>
                 )}
 
-                {/* small, optional, non-blocking — never had to be answered to use Crux.
-                    Kept visually quiet (smaller, softer border) so it reads as a minor
-                    aside, not a competitor to the "drop a document" line above it. */}
-                {!nameDone && (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      setName(nameDraft.trim())
-                      setNameDone(true)
-                    }}
-                    className="mt-2"
-                  >
-                    <input
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      placeholder="What should I call you? (optional)"
-                      className="w-56 rounded-full border border-border/50 bg-transparent px-3 py-1 text-center text-[11px] text-muted-foreground placeholder:text-muted-foreground/60 focus:border-accent focus:text-foreground focus:outline-none"
-                    />
-                  </form>
+                {/* Centered composer slot (empty state with a document): the ONE
+                    composerBox instance renders here instead of the docked slot
+                    below. text-left undoes the empty state's text-center so the
+                    textarea reads normally. self-stretch + the small negative
+                    margin let the hero composer sit a touch wider than the
+                    message column (still inside the slab's rail). */}
+                {composerCentered && (
+                  <div className="mt-4 self-stretch text-left md:-mx-2">{composerBox}</div>
                 )}
+
               </div>
             )}
 
@@ -1916,7 +2003,15 @@ const MessageBubble = memo(function MessageBubble({
   // works on touch and keyboard, not just mouse hover.
   const [openGroup, setOpenGroup] = useState<number | null>(null)
   const [pageInGroup, setPageInGroup] = useState(0)
-  const activeGroup = openGroup !== null ? sourceGroups[openGroup] : undefined
+  // The panel outlives openGroup by ~170ms so its exit can animate (see
+  // useDelayedUnmount). While it's closing, openGroup is already null, so we
+  // latch the last open group in a ref and keep rendering ITS content until the
+  // unmount really happens — otherwise the closing panel would go blank mid-fade.
+  const panel = useDelayedUnmount(openGroup !== null)
+  const lastGroupRef = useRef(0)
+  if (openGroup !== null) lastGroupRef.current = openGroup
+  const renderGroup = openGroup ?? (panel.mounted ? lastGroupRef.current : null)
+  const activeGroup = renderGroup !== null ? sourceGroups[renderGroup] : undefined
   const activePassage = activeGroup?.items[pageInGroup]
   // Points at the opened passage panel so we can scroll it into view. The
   // last message has nothing below it to push the panel up, so without this it
@@ -1924,6 +2019,9 @@ const MessageBubble = memo(function MessageBubble({
   const sourcePanelRef = useRef<HTMLDivElement>(null)
   // "What went wrong?" popover for a down-vote, plus its optional detail fields.
   const [downOpen, setDownOpen] = useState(false)
+  // same delayed-unmount treatment as the source panel, so dismissing the
+  // "what went wrong" popover animates out instead of vanishing
+  const downPop = useDelayedUnmount(downOpen)
   const [category, setCategory] = useState('')
   const [comment, setComment] = useState('')
   const [thanksVisible, setThanksVisible] = useState(false)
@@ -2105,7 +2203,7 @@ const MessageBubble = memo(function MessageBubble({
       {message.done && activePassage?.snippet && (
         // .source-panel: on the dark tool surface globals.css swaps the flat
         // card + light-page shadow for the composer's frosted-glass look
-        <div ref={sourcePanelRef} className="source-panel fade-in max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg">
+        <div ref={sourcePanelRef} className={`source-panel ${panel.closing ? 'popover-out' : 'popover-in'} max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg`}>
           <div className="mb-1.5 flex items-center justify-between gap-3">
             <p className="font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
               Source passage
@@ -2238,10 +2336,12 @@ const MessageBubble = memo(function MessageBubble({
 
                   {/* "what went wrong" detail popover — the down-vote itself already
                       posted on click; this only adds category/comment on Submit */}
-                  {downOpen && (
+                  {downPop.mounted && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={cancelDetail} />
-                      <div className="fade-in absolute bottom-full right-0 z-50 mb-2 w-72 max-w-[85vw] rounded-xl border border-border bg-card p-3.5 shadow-lg">
+                      {/* click-away layer only while truly open — a closing
+                          popover must not keep eating clicks */}
+                      {downOpen && <div className="fixed inset-0 z-40" onClick={cancelDetail} />}
+                      <div className={`${downPop.closing ? 'popover-out' : 'popover-in'} absolute bottom-full right-0 z-50 mb-2 w-72 max-w-[85vw] rounded-xl border border-border bg-card p-3.5 shadow-lg`}>
                         <p className="mb-2 text-xs font-semibold text-foreground">What went wrong?</p>
                         <select
                           value={category}

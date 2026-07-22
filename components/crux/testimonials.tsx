@@ -32,7 +32,9 @@ export function Testimonials() {
           {ITEMS.map((t) => (
             <figure
               key={t.author}
-              className="flex flex-col rounded-2xl border border-border bg-card p-6 transition-colors duration-200 hover:border-accent/40"
+              // inset top highlight: the page-wide lit-from-above edge, shared
+              // with the why-crux and pricing cards. Opaque fill, no glow.
+              className="flex flex-col rounded-2xl border border-border bg-card p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors duration-200 hover:border-accent/40"
             >
               {/* rating stars: a muted signal, not another accent surface —
                   burgundy stays reserved for the primary CTA and active states */}

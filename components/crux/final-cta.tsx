@@ -37,9 +37,36 @@ export function FinalCta() {
           </button>
         </div>
 
-        <p className="mt-8 font-mono text-xs uppercase tracking-widest text-muted-foreground">
-          No account. Nothing stored. Your files leave when you do.
-        </p>
+        {/* risk-reversal rows: every reason NOT to click, answered before the
+            visitor thinks of it. Quiet check rows, deliberately smaller than
+            the button so they read as reassurance, not a second pitch. The list
+            is a width-fitted block centered as a group, with rows left-aligned
+            inside it — so the checkmarks stack in one vertical line instead of
+            each row centering independently. */}
+        <ul className="mx-auto mt-8 flex w-fit max-w-md flex-col items-start gap-2 text-left">
+          {[
+            'Try it on your own documents. Right now, in this page.',
+            'Nothing uploaded to storage. Files die when the tab does.',
+            'No account. No card. No call.',
+          ].map((line) => (
+            <li
+              key={line}
+              className="flex items-start gap-2 text-[13px] leading-relaxed text-muted-foreground"
+            >
+              <svg
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-teal"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                aria-hidden="true"
+              >
+                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {line}
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   )

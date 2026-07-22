@@ -6,19 +6,37 @@ function Stat({ value, label }: { value: string; label: string }) {
       <span className="font-heading text-4xl font-bold tracking-tight text-accent md:text-5xl">
         {value}
       </span>
-      <span className="mt-2 text-[13px] leading-snug text-muted-foreground">
+      {/* every label gets the same max width, balanced wrapping, and a
+          two-line minimum height — so a short label and a long label occupy
+          the same box and the three columns bottom out at the same y. */}
+      <span className="mt-2 min-h-[2lh] max-w-[26ch] text-balance text-[13px] leading-snug text-muted-foreground">
         {label}
       </span>
     </div>
   )
 }
 
+// Weird-specific beats round-generic: these three are real measured results
+// from testing the deployed engine, not marketing rounding. 15/15 = the full
+// question battery against dangote.pdf (108 pages). 3 = distinct technical
+// standards pulled together in one cross-document question (the API 570/510
+// run). 0 = the grounding rule: no citation, no claim.
 export function Stats() {
   return (
     <section className="px-6 py-16">
-      <div className="mx-auto grid max-w-2xl grid-cols-2 gap-y-10 divide-x divide-border">
-        <Stat value="4" label="Input types: text, documents, images, audio" />
-        <Stat value="0 bytes" label="Stored by default" />
+      <div className="mx-auto grid max-w-4xl grid-cols-1 gap-y-10 sm:grid-cols-3 sm:divide-x sm:divide-border">
+        <Stat
+          value="15/15"
+          label="Answers verified against a 108-page financial report"
+        />
+        <Stat
+          value="3"
+          label="Technical standards cross-checked in one question"
+        />
+        <Stat
+          value="0"
+          label="Answers without a source. If it can't cite it, it says so."
+        />
       </div>
     </section>
   )

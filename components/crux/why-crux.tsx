@@ -2,10 +2,26 @@
 
 import { useReveal } from './use-reveal'
 
-const VALUES = [
-  'Answers in seconds, not hours.',
-  'Every answer, traced to its source.',
-  'Your documents vanish the moment you leave.',
+// The pre-emptive category defense: name the two things a visitor will
+// mentally compare Crux against, concede what each does, and let the third
+// column win on the one axis that matters (cited answers). Opaque ink cards,
+// NOT glass — glass is reserved for the tool's chrome layer (DESIGN.md).
+const COLUMNS = [
+  {
+    name: 'Ctrl+F',
+    line: 'Finds words. Misses meaning.',
+    crux: false,
+  },
+  {
+    name: 'Chatbots',
+    line: 'Answers from anywhere. Confidently wrong.',
+    crux: false,
+  },
+  {
+    name: 'Crux',
+    line: 'Answers from your documents. With the page it came from.',
+    crux: true,
+  },
 ]
 
 export function WhyCrux() {
@@ -14,7 +30,7 @@ export function WhyCrux() {
     <section className="px-6 py-24">
       <div
         ref={ref}
-        className={`mx-auto max-w-2xl text-center reveal ${visible ? 'is-visible' : ''}`}
+        className={`mx-auto max-w-4xl text-center reveal ${visible ? 'is-visible' : ''}`}
       >
         <h2 className="font-heading text-3xl font-bold leading-tight tracking-tight text-balance md:text-4xl">
           {/* two-tone treatment: text unchanged, just split at the sentence
@@ -22,14 +38,34 @@ export function WhyCrux() {
           <span className="text-foreground">Your team already wrote the answer.</span>{' '}
           <span className="text-muted-foreground">Crux remembers where.</span>
         </h2>
-        <div className="mt-10 flex flex-col gap-4">
-          {VALUES.map((v) => (
-            <p
-              key={v}
-              className="text-lg font-medium leading-relaxed text-muted-foreground"
+        {/* items-stretch + h-full flex-col: every card fills its grid row, so
+            all three read as the same height. The heading sits in a fixed
+            min-height row so the one-liners below start at the same y across
+            cards even if a heading ever wraps. Inset top highlight = the
+            page-wide "lit from above" edge (no glow, no blur — opaque card). */}
+        <div className="mt-12 grid items-stretch gap-4 sm:grid-cols-3">
+          {COLUMNS.map((col) => (
+            <div
+              key={col.name}
+              className={
+                col.crux
+                  ? // the favored column: accent rim + a small lift so the eye
+                    // lands here last and stays. Still an opaque card.
+                    'flex h-full flex-col rounded-2xl border border-[color-mix(in_srgb,var(--accent-bright)_45%,transparent)] bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_16px_40px_-20px_rgba(0,0,0,0.8)] sm:-translate-y-1.5'
+                  : 'flex h-full flex-col rounded-2xl border border-border bg-card p-6 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+              }
             >
-              {v}
-            </p>
+              <h3
+                className={`flex min-h-[1.75rem] items-baseline font-heading text-lg font-bold tracking-tight ${
+                  col.crux ? 'text-accent' : 'text-foreground'
+                }`}
+              >
+                {col.name}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {col.line}
+              </p>
+            </div>
           ))}
         </div>
       </div>

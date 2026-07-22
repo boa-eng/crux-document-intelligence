@@ -31,21 +31,57 @@
   --radius-xl: 1.5rem;
 }
 
+/* BRANCH SCOPE DECISION (redesign-dark-glass): the whole page goes dark by
+   promoting the tool's warm-ink palette to :root, rather than adding a
+   .page-dark wrapper. Every landing component already reads these semantic
+   tokens, so one block here flips hero/tension/demos/testimonials/footer at
+   once with zero className churn — and .tool-dark still re-points the same
+   tokens inside the widget, so its tuned values keep winning there. On main
+   this block stays the light paper palette; nothing outside this branch
+   assumes dark.
+   The page base (#141110) sits a step DARKER than the widget slab (#191512)
+   so the tool still reads as a lifted panel, not a hole in the page. */
 :root {
-  color-scheme: light;
-  --background: #F7F3EE;
-  --foreground: #1C1917;
-  --surface: #EFE9E1;
-  --card: #FCFAF7;
-  --card-foreground: #1C1917;
-  --border: #E4DAD0;
+  color-scheme: dark;
+  --background: #141110;
+  --foreground: #F2EDE6;
+  --surface: #1D1815;
+  --card: #1E1A16;
+  --card-foreground: #F2EDE6;
+  --border: rgba(255, 255, 255, 0.08);
+  /* --accent stays the solid burgundy: it is only ever a button FILL paired
+     with --accent-foreground (~8:1 anywhere). Accent used as text/border on
+     the ink goes through --accent-bright below — solid burgundy on ink is ~2:1. */
   --accent: #7A2E48;
-  --accent-glow: #7A2E48;
+  --accent-glow: color-mix(in srgb, #7A2E48 55%, white);
   --accent-foreground: #FCF9F7;
-  --muted: #EFE9E1;
-  --muted-foreground: #6B635C;
-  --teal: #3F7A6B;
-  --warn: #B23A2E;
+  --muted: #1D1815;
+  --muted-foreground: #A89F93;
+  /* teal/warn now sit on ink as text/tints page-wide, so they get the same
+     lift .tool-dark always gave them. Mixed from literals, never from
+     var(--teal) itself — see the circularity trap note further down. */
+  --teal: color-mix(in srgb, #3F7A6B 55%, white);
+  --warn: color-mix(in srgb, #B23A2E 60%, white);
+  /* bright variants for accent-as-text on the ink (~5.8:1 on #141110) */
+  --accent-bright: color-mix(in srgb, #7A2E48 60%, white);
+}
+
+/* accent as TEXT on the dark page (hero kicker, stat values, footer wordmark,
+   "Try a demo like this" links, process numbers): lift to the readable bright
+   variant. Same move .tool-dark already makes; now the whole page needs it.
+   The solid bg-accent button fill is untouched. */
+.text-accent,
+.hover\:text-accent:hover {
+  color: var(--accent-bright);
+}
+/* card hover edges (demos, testimonials) — solid burgundy border is invisible
+   on ink, so the brightened accent does the hover work at the same alpha */
+.hover\:border-accent\/40:hover {
+  border-color: color-mix(in srgb, var(--accent-bright) 40%, transparent);
+}
+/* keyboard focus rings page-wide: same lift, same 40% alpha */
+.focus-visible\:ring-accent\/40:focus-visible {
+  --tw-ring-color: color-mix(in srgb, var(--accent-bright) 40%, transparent);
 }
 
 @layer base {
@@ -87,8 +123,10 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.035;
-  mix-blend-mode: multiply;
+  opacity: 0.03;
+  /* on the dark page grain must ADD light, not remove it — multiply (which
+     darkened the paper) is invisible against near-black, screen is not */
+  mix-blend-mode: screen;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -101,14 +139,38 @@
   z-index: -2;
   overflow: hidden;
   background-color: var(--background);
+  /* static ambient depth: three large, soft, off-center glows (accent top-left
+     under the hero, teal mid-right by the tool, a faint warm ember low-center
+     near the CTA). This is what the glass surfaces refract — glass over a flat
+     solid reads as low-opacity grey (the anti-pattern). First pass sat at
+     9%/7% and the page still read as flat black at normal brightness, so the
+     alphas doubled and the ellipses grew; still soft-edged, no neon.
+     Deliberately NOT animated. */
+  background-image:
+    radial-gradient(
+      70rem 48rem at 16% 8%,
+      color-mix(in srgb, var(--accent-bright) 18%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      72rem 54rem at 92% 42%,
+      color-mix(in srgb, #3f7a6b 14%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      60rem 40rem at 50% 98%,
+      color-mix(in srgb, #b2762e 8%, transparent),
+      transparent 70%
+    );
 }
 
-/* Faint warm dot grid — barely-there texture, fades toward edges */
+/* Faint dot grid — barely-there texture, fades toward edges. Light dots now:
+   the old ink-dark dots vanished against the dark base */
 .crux-bg__grid {
   position: absolute;
   inset: 0;
   background-image:
-    radial-gradient(circle, rgba(26, 26, 24, 0.05) 1px, transparent 1px);
+    radial-gradient(circle, rgba(242, 237, 230, 0.05) 1px, transparent 1px);
   background-size: 30px 30px;
   background-position: 0 0;
   -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000, transparent 85%);
@@ -250,6 +312,32 @@
   animation: fade-in 0.3s ease forwards;
 }
 
+/* ============================================
+   POPOVER ENTER/EXIT PAIR — macOS-style. Enter: fade + a small rise, ease-out
+   (fast start, gentle landing). Exit: fade + slight shrink + a few px of
+   downward drift, ease-in (gentle start, quick finish) and a touch shorter
+   than the enter, the way macOS popovers dismiss. React removes an element
+   from the DOM the instant its state clears, so the exit can never play on
+   its own — useDelayedUnmount in tool.tsx keeps the element mounted with
+   .popover-out applied until this animation has had time to run.
+   ============================================ */
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.popover-in {
+  animation: popover-in 200ms cubic-bezier(0, 0, 0.2, 1) forwards;
+}
+@keyframes popover-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(5px) scale(0.98); }
+}
+.popover-out {
+  animation: popover-out 170ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  /* a panel on its way out should never swallow the click that dismissed it */
+  pointer-events: none;
+}
+
 @keyframes border-flash {
   0% { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   100% { border-color: var(--border); box-shadow: none; }
@@ -308,10 +396,31 @@
   animation: citation-stamp 400ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
 }
 
+/* sticky nav bar — the page's one piece of floating chrome, so it gets the
+   frosted treatment: near-invisible warm fill, blur + saturate doing the work
+   (blur alone greys out), and a specular top rim so it reads as a lit pane */
 .glass {
-  background: rgba(251, 250, 246, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* the fill is a top-heavy gradient, not a flat wash: darker under the text
+     row (keeps the wordmark/CTA at 4.5:1+ over busy content) and thinner at
+     the bottom edge so the page visibly blurs through as it scrolls under —
+     the macOS-menubar moment. Blur alone greys out, so saturate rides along. */
+  background: linear-gradient(
+    rgba(20, 17, 14, 0.7),
+    rgba(20, 17, 14, 0.3)
+  );
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  /* two inset rims: specular top edge (light from above) + a faint light line
+     along the bottom border, the edge the scrolling content slides beneath */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+}
+/* no-blur fallback: solid ink so the bar never turns into a grey smear */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: rgba(20, 17, 16, 0.97);
+  }
 }
 
 /* ============================================
@@ -366,10 +475,49 @@
   color-scheme: dark;
 }
 
-/* outer slab — the tool sits on the paper page like a physical dark panel */
+/* outer slab — the tool sits on the page like a physical dark panel. Now that
+   the page itself is ink, a black drop shadow alone can't separate slab from
+   page (ink-on-ink), so three things do the lifting together: a brighter 1px
+   top rim (light catching the pane's upper edge), a hairline ring of light
+   just OUTSIDE the border box (drawn as a spread shadow so it never fights
+   the dragOver border-accent swap on the element's real border), and a much
+   deeper two-layer black drop that anchors the slab to the page. The slab
+   fill also steps one notch lighter than the old #191512 so it reads as a
+   pane ABOVE the #141110 page, not a hole cut into it. */
 .tool-card {
-  background: var(--tool-bg) !important;
-  box-shadow: 0 32px 80px -28px rgba(0, 0, 0, 0.6);
+  position: relative; /* anchors the ::before specular ring below */
+  background: #1b1713 !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 24px 48px -16px rgba(0, 0, 0, 0.8),
+    0 48px 100px -24px rgba(0, 0, 0, 0.9);
+}
+/* specular edge ring: a 1px gradient border-light, brightest at the top and
+   fading down the sides, so the slab reads as a pane catching light from
+   above rather than a uniformly bordered box. Drawn as a masked ::before
+   (the pass-1 recipe) instead of a border-image so the element's REAL border
+   stays free for the dragOver border-accent swap; the ring's low-alpha whites
+   sit over it without hiding the accent. pointer-events: none so it can never
+   eat the drag/drop events the slab listens for. */
+.tool-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.22),
+    rgba(255, 255, 255, 0.06) 35%,
+    rgba(255, 255, 255, 0.02)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
 }
 
 /* the composer — the one true "liquid glass" moment: frosted, faintly lit
@@ -377,8 +525,8 @@
 .tool-composer {
   background: var(--tool-glass);
   border-color: var(--tool-border-strong);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   background-image: radial-gradient(
     130% 160% at 12% -10%,
     color-mix(in srgb, var(--accent-bright) 6%, transparent),
@@ -401,8 +549,8 @@
     rgba(255, 250, 245, 0.05)
   );
   border: 1px solid var(--tool-border-strong);
-  backdrop-filter: blur(12px) saturate(160%);
   -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 /* no-blur fallback: a solid warm surface so the pill never turns into a flat
@@ -419,13 +567,39 @@
   background: var(--tool-glass);
   border-color: var(--tool-border);
   color: var(--accent-bright);
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   box-shadow: 0 0 16px -4px color-mix(in srgb, var(--accent-bright) 45%, transparent);
 }
 .tool-dark .citation-stamp:hover {
   background: color-mix(in srgb, var(--tool-glass) 85%, var(--accent-bright) 10%);
+  border-color: var(--tool-border-strong);
   box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent-bright) 60%, transparent);
+}
+
+/* hover feel: every property a hover touches (fill, edge, glow, text) eases
+   over the same 150ms so nothing snaps — the chip brightens as one piece.
+   Blur is deliberately NOT transitioned or changed on hover (hover brightens
+   fill/edge, never adds blur). */
+.tool-dark .citation-stamp,
+.tool-dark .source-panel,
+.tool-dark .tool-chip {
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+
+/* the small bordered controls (header buttons, empty-state suggestion chips)
+   share one hover voice: a faint warm-white fill lift alongside the border/
+   text change their utility classes already do, so the whole control brightens
+   together instead of only the border moving */
+.tool-dark .tool-chip:hover {
+  /* mixed from the surface (not a translucent white) because the suggestion
+     chips already sit ON a surface fill — a 5% white overlay would land on the
+     same color and read as no change at all */
+  background-color: color-mix(in srgb, var(--tool-surface) 91%, white);
 }
 
 /* streaming caret reads better lifted against the deep ink */
@@ -472,19 +646,27 @@
 .tool-dark .source-panel {
   background: var(--tool-glass);
   border-color: var(--tool-border-strong);
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.7);
+}
+/* the pane's edge catches a little more light under the pointer — same
+   brighten-the-edge move as the chips, and again no blur change */
+.tool-dark .source-panel:hover {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* the run of the passage that most overlaps the answer text — the trust signal.
-   A subtle accent wash (not neon) so the eye lands on the exact sentence the
-   claim was drawn from, the way Perplexity underlines the cited snippet. */
+   An accent wash strong enough to unmistakably read as "the sentence the answer
+   used" (18% was subtle to the point of invisible on the frosted panel): wash
+   lifted to 30%, the text itself steps up to semibold and near-full foreground.
+   Still a wash, not neon — no glow, no border. */
 .tool-dark .crux-hl {
-  background: color-mix(in srgb, var(--accent-bright) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-bright) 30%, transparent);
   border-radius: 3px;
-  padding: 0 1px;
-  color: inherit;
+  padding: 0 2px;
+  color: var(--tool-fg);
+  font-weight: 600;
 }
 
 /* keyboard focus rings use ring-accent/40 — the solid burgundy accent nearly
