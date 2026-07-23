@@ -634,3 +634,15 @@ Conclusion: the Perplexity/Claude layout patterns are the real design source; Fi
 - https://www.ubergizmo.com/2025/12/gemini-web-new-design/ and https://chromeunboxed.com/gemini-for-web-gets-a-sleek-redesign-with-a-new-dark-mode-and-a-my-stuff-hub/
 - https://blog.openreplay.com/controlling-line-length-css-readability/
 - Figma files: links in section above (details limited to public descriptions; direct fetch returns 403)
+
+---
+
+# Working note 2026-07-23 — demo-card → composer prefill (`crux:prefill` event)
+
+Demo cards in `components/crux/demos.tsx` and the composer in `components/crux/tool.tsx` are sibling components with no shared parent state, so the "Try a demo like this →" link talks to the composer through a plain browser event instead of a context/provider:
+
+- **Sender** (demos.tsx `loadDemo(q)`): `window.dispatchEvent(new CustomEvent('crux:prefill', { detail: q }))` then smooth-scrolls to `#tool`. `q` is always the card's own displayed question (`d.q`), so the prefill text can never drift from the card copy.
+- **Listener** (tool.tsx, one `useEffect` near `editMessage`): reads `(e as CustomEvent<string>).detail`, ignores non-string/blank, and calls the existing `editMessage()` (same fill + focus + textarea auto-grow path the suggestion chips use).
+- **Contract**: event name `crux:prefill`, `detail` = the question string. Fire-and-forget; if no doc is uploaded the text still fills and a send falls into general chat.
+
+Also in this pass: the five demo filter tabs (All/Legal/Medical/Finance/HR) get `text-xs` + `px-2.5` + `gap-0.5` below `sm` so they hold one row at 390px (they previously wrapped "HR" to a second line); desktop sizes unchanged.

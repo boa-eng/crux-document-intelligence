@@ -43,7 +43,12 @@ const TABS = ['All', 'Legal', 'Medical', 'Finance', 'HR']
 
 // Doesn't touch component state, so it lives outside the component — keeps
 // the function identity stable across renders instead of rebuilding it every time.
-function loadDemo() {
+// Besides scrolling to the tool, it broadcasts the card's own question via a
+// plain browser event ("crux:prefill") — the tool listens for it and drops the
+// text into the composer. A DOM event because Demos and Tool are sibling
+// components with no shared parent state; this avoids a context refactor.
+function loadDemo(q: string) {
+  window.dispatchEvent(new CustomEvent('crux:prefill', { detail: q }))
   document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
 }
 
@@ -62,13 +67,15 @@ export function Demos() {
         </p>
 
         {/* filter tabs */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-1">
+        {/* below sm: tighter padding + text-xs so all five tabs hold one row
+            at 390px (no wrap, no scroll); desktop sizes unchanged */}
+        <div className="mt-6 flex items-center justify-center gap-0.5 sm:gap-1">
           {TABS.map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => setActive(tab)}
-              className={`relative px-4 py-2 text-sm font-medium transition-colors ${
+              className={`relative px-2.5 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 active === tab
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -76,7 +83,7 @@ export function Demos() {
             >
               {tab}
               {active === tab && (
-                <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-accent" />
+                <span className="absolute inset-x-2 -bottom-px sm:inset-x-3 h-0.5 rounded-full bg-accent" />
               )}
             </button>
           ))}
@@ -134,7 +141,7 @@ export function Demos() {
               </span>
               <button
                 type="button"
-                onClick={loadDemo}
+                onClick={() => loadDemo(d.q)}
                 className="mt-4 text-sm font-semibold text-accent transition-colors hover:text-accent-glow"
               >
                 Try a demo like this →

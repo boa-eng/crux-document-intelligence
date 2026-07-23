@@ -972,6 +972,19 @@ export function Tool() {
     }
   }, [])
 
+  // demo cards on the landing page prefill the composer. They live in a
+  // sibling component (demos.tsx), so the question arrives as a browser
+  // "crux:prefill" event with the text in `detail` — reusing editMessage
+  // gives us the same fill + focus + auto-grow behavior as suggestion chips.
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const q = (e as CustomEvent<string>).detail
+      if (typeof q === 'string' && q.trim()) editMessage(q)
+    }
+    window.addEventListener('crux:prefill', onPrefill)
+    return () => window.removeEventListener('crux:prefill', onPrefill)
+  }, [editMessage])
+
   const counterColor =
     remaining <= 0
       ? 'text-warn'
