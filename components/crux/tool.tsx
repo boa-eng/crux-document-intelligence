@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -301,6 +301,13 @@ function useTypewriterPlaceholder(
 export function Tool() {
   const [files, setFiles] = useState<File[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
+  // document-aware suggestion chips, two tiers: /upload returns instant
+  // heading-derived chips (tier 1), then POST /suggestions swaps in 4
+  // LLM-written questions (tier 2). null = fall back to the static chips.
+  const [suggestions, setSuggestions] = useState<string[] | null>(null)
+  // bumped on every upload/clear so a slow tier-2 response for an OLD file
+  // set can never overwrite chips that belong to a newer one (or to no docs)
+  const suggestSeqRef = useRef(0)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -469,6 +476,10 @@ export function Tool() {
   const uploadSession = async (set: File[]) => {
     if (set.length === 0) {
       setSessionId(null)
+      // no documents left — back to the static chips, and orphan any tier-2
+      // request still in flight for the removed set
+      suggestSeqRef.current++
+      setSuggestions(null)
       return
     }
     setUploading(true)
@@ -480,9 +491,32 @@ export function Tool() {
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setSessionId(data.session_id)
+      // tier 1: heading-derived chips arrive with the upload itself — swap them
+      // in immediately; an empty list means "nothing usable", keep static chips
+      const tier1 = Array.isArray(data.suggestions) ? data.suggestions : []
+      setSuggestions(tier1.length > 0 ? tier1 : null)
+      // tier 2: one fire-and-forget LLM call for smarter questions. The seq
+      // token discards the response silently if the user re-uploaded, cleared,
+      // or (via composerCentered) already sent a message by the time it lands.
+      const seq = ++suggestSeqRef.current
+      fetch(`${API_BASE}/suggestions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: data.session_id }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (seq !== suggestSeqRef.current) return // a newer file set owns the chips now
+          if (d && Array.isArray(d.suggestions) && d.suggestions.length > 0) {
+            setSuggestions(d.suggestions)
+          }
+        })
+        .catch(() => {}) // suggestions are decoration — never surface an error
     } catch {
       setUploadError('Could not read those documents. Try another file.')
       setSessionId(null)
+      suggestSeqRef.current++
+      setSuggestions(null)
     } finally {
       setUploading(false)
     }
@@ -899,6 +933,9 @@ export function Tool() {
     setMessages([])
     setSessionId(null)
     setUploadError(null)
+    // reset to the static chips and orphan any in-flight tier-2 response
+    suggestSeqRef.current++
+    setSuggestions(null)
   }
 
   const openGaps = async () => {
@@ -1505,24 +1542,38 @@ export function Tool() {
                     Copilot's open-space chips; clicking one fills the composer
                     via editMessage; they vanish once the first message exists. */}
                 {composerCentered && (
-                  <div className="mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
-                    {[
-                      files.length > 1 ? 'Summarize these documents' : 'Summarize this document',
-                      'What are the key figures?',
-                      ...(files.length > 1 ? ['Compare the uploaded files'] : []),
-                      'Find a number buried in a table',
-                      "What's missing from this document?",
-                      'Explain the hardest section simply',
-                    ].map((chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() => editMessage(chip)}
-                        className="tool-chip rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-foreground/80 transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                      >
-                        {chip}
-                      </button>
-                    ))}
+                  // Chip source, best available first: tier-2 LLM questions >
+                  // tier-1 heading chips (both live in `suggestions`) > the
+                  // static generic list as the last-resort fallback. Keyed on
+                  // the list itself so an upgrade remounts the row and replays
+                  // the fade — chips quietly become smarter in place, no
+                  // spinner. Cap 5 visible either way.
+                  <div
+                    key={(suggestions ?? []).join('|')}
+                    className="fade-in mt-5 flex max-w-2xl flex-wrap justify-center gap-2"
+                  >
+                    {(suggestions && suggestions.length > 0
+                      ? suggestions
+                      : [
+                          files.length > 1 ? 'Summarize these documents' : 'Summarize this document',
+                          'What are the key figures?',
+                          ...(files.length > 1 ? ['Compare the uploaded files'] : []),
+                          'Find a number buried in a table',
+                          "What's missing from this document?",
+                          'Explain the hardest section simply',
+                        ]
+                    )
+                      .slice(0, 5)
+                      .map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => editMessage(chip)}
+                          className="tool-chip rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-foreground/80 transition hover:border-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        >
+                          {chip}
+                        </button>
+                      ))}
                   </div>
                 )}
 
@@ -1979,40 +2030,24 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
-  // Perplexity-style stacking: one chip per DOCUMENT, not per (file,page). Group
-  // the flat sources list by filename, preserving the backend's most-relevant-
-  // first order — so the first passage in each group (the one the chip labels) is
-  // the strongest hit for that document, and the rest page behind it. Pure
-  // frontend grouping; the backend contract (flat labels + snippets) is untouched.
-  const sourceGroups = useMemo(() => {
-    const groups: { file: string; items: Source[] }[] = []
-    const byFile = new Map<string, { file: string; items: Source[] }>()
-    for (const s of message.sources ?? []) {
-      let g = byFile.get(s.file)
-      if (!g) {
-        g = { file: s.file, items: [] }
-        byFile.set(s.file, g)
-        groups.push(g)
-      }
-      g.items.push(s)
-    }
-    return groups
-  }, [message.sources])
-  // Which document group's passage panel is open (null = none), and which passage
-  // within that group is showing (the ‹ › pager moves this). Click-to-toggle so it
+  // Display-all citations (user decision, 2026-07-23): every cited passage gets
+  // its OWN chip, no per-document "+N" stacking. The earlier Perplexity-style
+  // grouping hid sources behind a cryptic "+K" suffix; the user wants nothing
+  // hidden — the backend caps citations at 6, so the row just wraps. The flat
+  // most-relevant-first backend order is rendered as-is.
+  const sources = message.sources ?? []
+  // Which citation's passage panel is open (null = none). Click-to-toggle so it
   // works on touch and keyboard, not just mouse hover.
-  const [openGroup, setOpenGroup] = useState<number | null>(null)
-  const [pageInGroup, setPageInGroup] = useState(0)
-  // The panel outlives openGroup by ~170ms so its exit can animate (see
-  // useDelayedUnmount). While it's closing, openGroup is already null, so we
-  // latch the last open group in a ref and keep rendering ITS content until the
+  const [openSourceIdx, setOpenSourceIdx] = useState<number | null>(null)
+  // The panel outlives openSourceIdx by ~170ms so its exit can animate (see
+  // useDelayedUnmount). While it's closing, openSourceIdx is already null, so we
+  // latch the last open index in a ref and keep rendering ITS content until the
   // unmount really happens — otherwise the closing panel would go blank mid-fade.
-  const panel = useDelayedUnmount(openGroup !== null)
-  const lastGroupRef = useRef(0)
-  if (openGroup !== null) lastGroupRef.current = openGroup
-  const renderGroup = openGroup ?? (panel.mounted ? lastGroupRef.current : null)
-  const activeGroup = renderGroup !== null ? sourceGroups[renderGroup] : undefined
-  const activePassage = activeGroup?.items[pageInGroup]
+  const panel = useDelayedUnmount(openSourceIdx !== null)
+  const lastIdxRef = useRef(0)
+  if (openSourceIdx !== null) lastIdxRef.current = openSourceIdx
+  const renderIdx = openSourceIdx ?? (panel.mounted ? lastIdxRef.current : null)
+  const activePassage = renderIdx !== null ? sources[renderIdx] : undefined
   // Points at the opened passage panel so we can scroll it into view. The
   // last message has nothing below it to push the panel up, so without this it
   // opens below the fold and gets clipped by the composer.
@@ -2028,43 +2063,43 @@ const MessageBubble = memo(function MessageBubble({
   const downTextareaRef = useRef<HTMLTextAreaElement>(null)
   const thanksTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    if (openGroup === null && !downOpen) return
+    if (openSourceIdx === null && !downOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setOpenGroup(null)
+        setOpenSourceIdx(null)
         setDownOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openGroup, downOpen])
+  }, [openSourceIdx, downOpen])
   // When a passage opens, pull it fully into view inside the chat scroll area.
   // rAF waits for the panel to mount and lay out first. The panel now renders
   // ABOVE the chip row (grows upward), so 'nearest' just nudges it into view if
   // it's slightly off-screen — no jarring jump to the bottom like block:'end' did.
   useEffect(() => {
-    if (openGroup === null) return
+    if (openSourceIdx === null) return
     const raf = requestAnimationFrame(() => {
       sourcePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
     return () => cancelAnimationFrame(raf)
-  }, [openGroup])
+  }, [openSourceIdx])
   // Tap anywhere outside the open passage to dismiss it. The panel can block the
   // messages above it, so clicking away is the quickest way to get the view back.
   // Clicks on the panel itself (scrolling it) and on a citation chip (which owns
   // its own open/close toggle) are left alone so they don't fight this handler.
   useEffect(() => {
-    if (openGroup === null) return
+    if (openSourceIdx === null) return
     const onDocDown = (e: MouseEvent) => {
       const t = e.target as Element | null
       if (!t) return
       if (sourcePanelRef.current?.contains(t)) return
       if (t.closest?.('.citation-stamp')) return
-      setOpenGroup(null)
+      setOpenSourceIdx(null)
     }
     document.addEventListener('mousedown', onDocDown)
     return () => document.removeEventListener('mousedown', onDocDown)
-  }, [openGroup])
+  }, [openSourceIdx])
   useEffect(() => {
     if (downOpen) downTextareaRef.current?.focus()
   }, [downOpen])
@@ -2204,48 +2239,17 @@ const MessageBubble = memo(function MessageBubble({
         // .source-panel: on the dark tool surface globals.css swaps the flat
         // card + light-page shadow for the composer's frosted-glass look
         <div ref={sourcePanelRef} className={`source-panel ${panel.closing ? 'popover-out' : 'popover-in'} max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-lg`}>
-          <div className="mb-1.5 flex items-center justify-between gap-3">
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
-              Source passage
-            </p>
-            {/* pager: only when this document contributed more than one cited
-                passage — steps through them 1/N without leaving the answer */}
-            {activeGroup && activeGroup.items.length > 1 && (
-              <div className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => setPageInGroup((p) => Math.max(0, p - 1))}
-                  disabled={pageInGroup === 0}
-                  aria-label="Previous passage"
-                  className="rounded p-0.5 transition hover:text-foreground disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-                <span className="tabular-nums">
-                  {pageInGroup + 1}/{activeGroup.items.length}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPageInGroup((p) => Math.min(activeGroup.items.length - 1, p + 1))}
-                  disabled={pageInGroup >= activeGroup.items.length - 1}
-                  aria-label="Next passage"
-                  className="rounded p-0.5 transition hover:text-foreground disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </div>
-            )}
-          </div>
+          {/* one chip = one passage now, so there's no ‹1/N› pager anymore —
+              a single passage needs no paging */}
+          <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-teal/70">
+            Source passage
+          </p>
           <p className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-foreground">
             <HighlightedSnippet snippet={activePassage.snippet} answer={message.text} />
           </p>
           {activePassage.page && (
             <p className="mt-1.5 font-mono text-[10px] text-muted-foreground/70">
-              {activeGroup?.file} · p. {activePassage.page}
+              {activePassage.file} · p. {activePassage.page}
             </p>
           )}
         </div>
@@ -2254,34 +2258,26 @@ const MessageBubble = memo(function MessageBubble({
       {/* meta row: source chips (click or hover to see the passage) · timestamp · copy-on-hover */}
       {message.done && (
         <div className="flex flex-wrap items-center gap-2">
-          {sourceGroups.length > 0 ? (
-            sourceGroups.map((g, gi) => {
-              const first = g.items[0]
-              const extra = g.items.length - 1 // pages that collapse into "+N"
-              return (
-                <button
-                  key={g.file}
-                  type="button"
-                  // toggle this group's panel; always reset to its first (most
-                  // relevant) passage when (re)opening
-                  onClick={() => {
-                    setOpenGroup((cur) => (cur === gi ? null : gi))
-                    setPageInGroup(0)
-                  }}
-                  aria-expanded={openGroup === gi}
-                  title={extra > 0 ? `See ${g.items.length} cited passages from this document` : 'See the exact passage'}
-                  className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  {first.page ? `${g.file} · p. ${first.page}` : g.file}
-                  {extra > 0 && (
-                    <span className="font-semibold opacity-70">+{extra}</span>
-                  )}
-                </button>
-              )
-            })
+          {sources.length > 0 ? (
+            // Every citation gets its own chip (user decision: no "+N" stacking,
+            // nothing hidden). Same file can appear on several chips, one per
+            // page; the backend caps at 6 so the row just wraps if needed.
+            sources.map((s, si) => (
+              <button
+                key={`${s.file}-${s.page ?? 'na'}-${si}`}
+                type="button"
+                // toggle THIS citation's passage panel
+                onClick={() => setOpenSourceIdx((cur) => (cur === si ? null : si))}
+                aria-expanded={openSourceIdx === si}
+                title="See the exact passage"
+                className="citation-stamp inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/10 px-3 py-1 font-mono text-xs text-teal transition hover:bg-teal/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {s.page ? `${s.file} · p. ${s.page}` : s.file}
+              </button>
+            ))
           ) : (
             message.grounded === false && (
               <span

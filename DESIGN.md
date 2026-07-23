@@ -115,6 +115,12 @@ one of them is wrong.
   working. Panel state moved from `openSourceIdx` (flat index) to
   `openGroup` + `pageInGroup`; the ‹ › pager clamps (disabled at ends) rather than
   wrapping. Single-page docs render exactly as before (no pager, one passage).
+  **REVERTED (2026-07-23): the user overruled the grouping** — the "+K" suffix
+  read as cryptic and hid sources. Every citation now renders its own chip
+  ("file · p. N" each, wrapping; backend caps at 6), one chip opens one passage,
+  the ‹1/N› pager is gone, and panel state is back to a single open index
+  (`openSourceIdx`). The animated open/close, Esc/click-outside, and the overlap
+  highlight all survived the un-stacking. Don't re-group.
 - **Overlap highlight (the bonus) shipped.** `overlapSpan()` finds the longest run
   of ≥4 consecutive words shared between the passage and the answer and returns its
   char span in the ORIGINAL passage; `HighlightedSnippet` wraps it in `.crux-hl`
@@ -390,6 +396,39 @@ one of them is wrong.
 - **Stale-CSS trap hit AGAIN:** the `.dotmatrix` rules served as
   `display: block` until a second content edit to globals.css + reload.
   Verify via `getComputedStyle` first, always.
+- **REVERTED (2026-07-23).** The user judged the LED matrix non-uniform next
+  to the plain serif "3" and "0" in the same row. "15/15" is back to the
+  identical serif classes as the other two stat values; `dot-matrix.tsx` and
+  the DOT MATRIX CSS section are deleted. Do NOT rebuild this — the note above
+  stays only as a record of what was tried and why it lost.
+
+## Working notes — smart per-document suggestion chips (2026-07-23)
+
+- **Two-tier flow, one fallback chain: tier 2 > tier 1 > static.** The
+  empty-state chips are no longer hardcoded. `/upload` now returns
+  `suggestions` (tier 1: instant, LLM-free chips phrased from extracted
+  section headings — `search.py: _extract_headings` + `heading_suggestions`,
+  same heading-shape heuristic `section_query` relies on, plus junk filters
+  for boilerplate/date-lines/table-rows). Right after upload the frontend
+  fires ONE `POST /suggestions {session_id}` (tier 2:
+  `RAGSearch.suggest_questions()`, a single LLM call over filenames +
+  headings + first ~3 chunks per file capped at 4000 chars, defensively
+  parsed to 4 questions). That endpoint never errors — any failure returns
+  `{"suggestions": []}` so chips silently stay at the best tier reached.
+- **Frontend upgrade-in-place** (`tool.tsx`): `suggestions` state (null =
+  static fallback) + `suggestSeqRef`, a sequence token bumped on every
+  upload/remove/clear so a slow tier-2 response for an old file set is
+  discarded silently (chips are gone anyway once a message is sent — they
+  only render while `composerCentered`). The chip row is keyed on the list
+  content with the existing `.fade-in`, so a tier swap re-runs the fade —
+  no spinner, chips just get smarter. Cap 5 visible; click still fills the
+  composer via `editMessage`; styling untouched.
+- Verified against dangote.pdf: tier 1 yields four "What does it say
+  about …?" chips from real note headings; tier 2 (one live Qwen call)
+  returned 4 doc-specific questions (market cap, Obajana renaming, revenue
+  disaggregation, impairment). Fallback + upgrade paths exercised live on
+  the running frontend (old backend 404s `/suggestions` → static chips
+  hold; mocked 200 → chips swap in place).
 
 ---
 

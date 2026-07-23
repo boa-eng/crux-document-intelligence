@@ -1,8 +1,6 @@
 'use client'
 
-import { DotMatrix } from './dot-matrix'
-
-function Stat({ value, label }: { value: React.ReactNode; label: string }) {
+function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div className="flex flex-col items-center px-4 text-center">
       <span className="font-heading text-4xl font-bold tracking-tight text-accent md:text-5xl">
@@ -27,16 +25,10 @@ export function Stats() {
   return (
     <section className="px-6 py-16">
       <div className="mx-auto grid max-w-4xl grid-cols-1 gap-y-10 sm:grid-cols-3 sm:divide-x sm:divide-border">
-        {/* the first stat's number renders as an LED dot-matrix instead of
-            serif text. The flex wrapper pins the matrix to the exact line
-            box the other numbers occupy (40px at text-4xl, 48px at md's
-            text-5xl) so all three labels keep sharing a baseline. */}
+        {/* plain serif like the other two — the dot-matrix experiment was
+            reverted (non-uniform next to the plain "3" and "0"; see DESIGN.md) */}
         <Stat
-          value={
-            <span className="flex h-10 items-center md:h-12">
-              <DotMatrix text="15/15" />
-            </span>
-          }
+          value="15/15"
           label="Answers verified against a 108-page financial report"
         />
         <Stat
