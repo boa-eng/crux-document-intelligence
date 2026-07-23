@@ -68,6 +68,37 @@ const DRIP_MAX_SPEED = 9 // ceiling, ~540 chars/sec — reading pace, not a burs
 
 type Citation = { label: string; snippet?: string }
 
+// ---- Web Speech API types ------------------------------------------------
+// The browser's live speech-to-text (SpeechRecognition) has NO standard
+// TypeScript lib types — it's a separate, still-vendor-prefixed spec — so we
+// declare the slim shape we actually touch. `results` is an array-like of
+// alternatives; each entry carries the recognized `transcript` plus an
+// `isFinal` flag telling us whether it's a settled phrase or a live guess.
+type SpeechAlt = { transcript: string }
+type SpeechResult = ArrayLike<SpeechAlt> & { isFinal: boolean }
+type SpeechResultEvent = { results: ArrayLike<SpeechResult> }
+type SpeechErrorEvent = { error: string }
+type SpeechRec = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  start: () => void
+  stop: () => void
+  onresult: ((e: SpeechResultEvent) => void) | null
+  onerror: ((e: SpeechErrorEvent) => void) | null
+  onend: (() => void) | null
+}
+// Both the standard and the webkit-prefixed constructor live on window; grab
+// whichever exists (Chrome/Edge/Safari expose webkit; nothing in Firefox).
+function getSpeechRecognitionCtor(): (new () => SpeechRec) | null {
+  if (typeof window === 'undefined') return null
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRec
+    webkitSpeechRecognition?: new () => SpeechRec
+  }
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null
+}
+
 /** Backend citation label looks like "report.pdf · p. 14". Split into parts. */
 function parseCitation(c: Citation): {
   file: string
@@ -309,6 +340,11 @@ export function Tool() {
   // set can never overwrite chips that belong to a newer one (or to no docs)
   const suggestSeqRef = useRef(0)
   const [uploading, setUploading] = useState(false)
+  // Aborts the in-flight /upload when the file set changes or clears, so the
+  // "Reading your document…" status can't hang after the user deletes a file
+  // mid-upload (the fetch is slow on mobile/HF; without this it ran to
+  // completion and the popup stayed up over an empty session).
+  const uploadAbortRef = useRef<AbortController | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -349,6 +385,15 @@ export function Tool() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const addInputRef = useRef<HTMLInputElement>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
+  // The composer wrapper (.tool-composer). A demo-card prefill scrolls THIS
+  // element to a comfortable viewport position; keeping the ref here lets the
+  // one owned scroll target the composer directly in whichever slot it renders.
+  const composerRef = useRef<HTMLDivElement>(null)
+  // Briefly flag "text just arrived" so the composer can play a gentle cue
+  // (a soft border/tint fade) after a demo prefill — the only signal that the
+  // question dropped in, since we suppress the jarring focus auto-scroll.
+  const [prefillCue, setPrefillCue] = useState(false)
+  const prefillCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Claude/GPT-style "+" attach menu open/closed
   const [attachOpen, setAttachOpen] = useState(false)
 
@@ -365,13 +410,27 @@ export function Tool() {
   // (announcing every drip-revealed token would spam a screen reader constantly).
   const [announceText, setAnnounceText] = useState('')
   const announcedIdRef = useRef<number | null>(null)
-  // Voice input (mic): record -> transcribe -> drop the words into the box
+  // Voice input (mic). Primary path is live in-browser transcription (Web
+  // Speech API): words appear in the box AS you speak. Fallback path (older
+  // browsers with no SpeechRecognition) is the original record→/transcribe
+  // batch flow, kept intact below.
   const [isRecording, setIsRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [transcribing, setTranscribing] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  // Live-transcription state: the recognition instance, the input text that was
+  // already there when we started listening (so speech APPENDS, never wipes),
+  // and the accumulated FINAL (settled) transcript. A visible error string and
+  // a one-time in-browser privacy note round out the UI — the old code failed
+  // silently with a console.warn, which is exactly what we're fixing.
+  const speechRecRef = useRef<SpeechRec | null>(null)
+  const voiceBaseRef = useRef('')
+  const voiceFinalRef = useRef('')
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [showVoiceNote, setShowVoiceNote] = useState(false)
+  const voiceNoteSeenRef = useRef(false)
   const genStartRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   // counts dragenter minus dragleave so crossing child elements doesn't flicker
@@ -389,6 +448,14 @@ export function Tool() {
     () => () => {
       if (dripRafRef.current != null) cancelAnimationFrame(dripRafRef.current)
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      // stop a live recognizer if the widget unmounts mid-listen
+      if (speechRecRef.current) {
+        try {
+          speechRecRef.current.stop()
+        } catch {
+          /* already stopped */
+        }
+      }
     },
     [],
   )
@@ -474,20 +541,26 @@ export function Tool() {
 
   /** Build (or rebuild) this session's in-memory index from the current files. */
   const uploadSession = async (set: File[]) => {
+    // Any earlier upload is now stale — cancel it so its finally-block can't
+    // flip `uploading` back on top of a newer/empty state.
+    uploadAbortRef.current?.abort()
     if (set.length === 0) {
       setSessionId(null)
+      setUploading(false) // nothing left to read — drop the status immediately
       // no documents left — back to the static chips, and orphan any tier-2
       // request still in flight for the removed set
       suggestSeqRef.current++
       setSuggestions(null)
       return
     }
+    const ctrl = new AbortController()
+    uploadAbortRef.current = ctrl
     setUploading(true)
     setUploadError(null)
     try {
       const form = new FormData()
       set.forEach((f) => form.append('files', f))
-      const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form })
+      const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form, signal: ctrl.signal })
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setSessionId(data.session_id)
@@ -512,13 +585,18 @@ export function Tool() {
           }
         })
         .catch(() => {}) // suggestions are decoration — never surface an error
-    } catch {
+    } catch (e) {
+      // A deliberate abort (user removed the file mid-upload) isn't an error —
+      // the newer uploadSession call already owns the UI state, so leave it be.
+      if (e instanceof DOMException && e.name === 'AbortError') return
       setUploadError('Could not read those documents. Try another file.')
       setSessionId(null)
       suggestSeqRef.current++
       setSuggestions(null)
     } finally {
-      setUploading(false)
+      // Only the current upload may clear the flag; an aborted stale one must
+      // not stomp the state a newer call has taken over.
+      if (uploadAbortRef.current === ctrl) setUploading(false)
     }
   }
 
@@ -861,9 +939,35 @@ export function Tool() {
   }
 
   // ---- Voice input --------------------------------------------------------
-  // Record from the mic, convert to WAV in the browser (MediaRecorder gives
-  // webm, but the ASR model wants mp3/wav), send it to /transcribe, and drop the
-  // spoken words into the message box so a client can talk instead of type.
+  // Two paths. PRIMARY: live in-browser transcription via the Web Speech API —
+  // words stream into the box as you talk (Claude-style). FALLBACK (kept from
+  // the original build): record → convert to WAV → POST /transcribe → drop the
+  // text in, used only when the browser has no SpeechRecognition. Whichever
+  // path runs, a failure now surfaces a VISIBLE message instead of a silent
+  // console.warn.
+
+  // Start / stop the mic timer that both paths share for the on-screen counter.
+  const startVoiceTimer = () => {
+    setRecordingSeconds(0)
+    recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+  }
+  const stopVoiceTimer = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+  }
+
+  // Grow the textarea to fit however much has been transcribed so far.
+  const growInput = () => {
+    const el = inputRef.current
+    if (el) {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+    }
+  }
+
+  // --- FALLBACK: batch record → /transcribe (unchanged flow, now with errors) -
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -883,10 +987,12 @@ export function Tool() {
           const data = await res.json()
           if (data.text) {
             setInput((prev) => (prev ? `${prev} ${data.text}` : data.text))
-            inputRef.current?.focus()
+            inputRef.current?.focus({ preventScroll: true })
           }
         } catch (e) {
+          // was a silent console.warn — now the user actually sees it
           console.warn('transcription failed', e)
+          setVoiceError('Could not transcribe that recording. Please try again.')
         } finally {
           setTranscribing(false)
         }
@@ -894,23 +1000,124 @@ export function Tool() {
       rec.start()
       mediaRecorderRef.current = rec
       setIsRecording(true)
-      setRecordingSeconds(0)
-      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+      startVoiceTimer()
     } catch (e) {
       console.warn('mic access denied', e)
+      setVoiceError('Microphone access was blocked. Enable it in your browser to record.')
     }
   }
 
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
+    mediaRecorderRef.current = null
     setIsRecording(false)
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current)
-      recordingTimerRef.current = null
+    stopVoiceTimer()
+  }
+
+  // --- PRIMARY: live Web Speech transcription --------------------------------
+  // Tear-down shared by every stop path (user click, recognizer's own onend,
+  // an error). Commits the settled transcript and drops any dangling interim
+  // guess so the box never keeps a half-heard word.
+  const finishListening = useCallback(() => {
+    stopVoiceTimer()
+    setIsRecording(false)
+    setShowVoiceNote(false)
+    speechRecRef.current = null
+    if (voiceFinalRef.current) {
+      setInput((voiceBaseRef.current + voiceFinalRef.current).replace(/\s+$/, ''))
+    }
+    inputRef.current?.focus({ preventScroll: true })
+    growInput()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const startListening = () => {
+    setVoiceError(null)
+    // Web Speech (and getUserMedia) only work over https / localhost.
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      setVoiceError('Voice input needs a secure (https) connection.')
+      return
+    }
+    const Ctor = getSpeechRecognitionCtor()
+    if (!Ctor) {
+      // No live API — fall back to the batch recorder so the mic still works.
+      startRecording()
+      return
+    }
+    try {
+      const rec = new Ctor()
+      rec.continuous = true
+      rec.interimResults = true
+      rec.lang = 'en-US'
+      // remember what was already typed; speech is appended after a space
+      voiceBaseRef.current = input ? `${input.replace(/\s+$/, '')} ` : ''
+      voiceFinalRef.current = ''
+      rec.onresult = (event) => {
+        // rebuild final + interim from the full results list each event: finals
+        // are settled phrases, interim is the live (still-changing) guess
+        let interim = ''
+        let finalText = ''
+        for (let i = 0; i < event.results.length; i++) {
+          const r = event.results[i]
+          const t = r[0]?.transcript ?? ''
+          if (r.isFinal) finalText += t
+          else interim += t
+        }
+        voiceFinalRef.current = finalText
+        setInput(voiceBaseRef.current + finalText + interim)
+        growInput()
+      }
+      rec.onerror = (event) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setVoiceError('Microphone permission was denied. Enable it in your browser to use voice.')
+        } else if (event.error === 'audio-capture') {
+          setVoiceError('No microphone was found.')
+        } else if (event.error === 'no-speech') {
+          // benign — recognizer heard nothing; just stop, no scary message
+        } else if (event.error !== 'aborted') {
+          setVoiceError('Voice input stopped unexpectedly. Please try again.')
+        }
+        finishListening()
+      }
+      rec.onend = () => finishListening()
+      speechRecRef.current = rec
+      rec.start()
+      setIsRecording(true)
+      startVoiceTimer()
+      // one-time privacy note: Web Speech routes audio through the browser vendor
+      if (!voiceNoteSeenRef.current) {
+        voiceNoteSeenRef.current = true
+        setShowVoiceNote(true)
+      }
+    } catch (e) {
+      console.warn('speech recognition failed to start', e)
+      setVoiceError('Could not start voice input. Please try again.')
+      finishListening()
     }
   }
 
-  const toggleRecording = () => (isRecording ? stopRecording() : startRecording())
+  const stopListening = () => {
+    const rec = speechRecRef.current
+    if (rec) {
+      try {
+        rec.stop() // fires onend → finishListening()
+      } catch {
+        finishListening()
+      }
+    } else {
+      finishListening()
+    }
+  }
+
+  // Mic button router: stop whichever path is live, else start the best one.
+  const toggleRecording = () => {
+    if (isRecording) {
+      if (speechRecRef.current) stopListening()
+      else stopRecording()
+      return
+    }
+    startListening()
+  }
 
   const handleNotifyChoice = (allow: boolean) => {
     setNotifyPromptVisible(false)
@@ -922,6 +1129,8 @@ export function Tool() {
   }
 
   const clearSession = () => {
+    // kill any in-flight upload so its status can't linger past the clear
+    uploadAbortRef.current?.abort()
     if (sessionId) {
       fetch(`${API_BASE}/clear`, {
         method: 'POST',
@@ -932,6 +1141,7 @@ export function Tool() {
     setFiles([])
     setMessages([])
     setSessionId(null)
+    setUploading(false)
     setUploadError(null)
     // reset to the static chips and orphan any in-flight tier-2 response
     suggestSeqRef.current++
@@ -972,18 +1182,68 @@ export function Tool() {
     }
   }, [])
 
-  // demo cards on the landing page prefill the composer. They live in a
-  // sibling component (demos.tsx), so the question arrives as a browser
-  // "crux:prefill" event with the text in `detail` — reusing editMessage
-  // gives us the same fill + focus + auto-grow behavior as suggestion chips.
+  // Demo cards on the landing page prefill the composer. They live in a sibling
+  // component (demos.tsx), so the question arrives as a browser "crux:prefill"
+  // event with the text in `detail`. This is the ONE owner of the demo→composer
+  // motion: demos.tsx no longer scrolls, so there's a single smooth scroll here
+  // and never two competing ones.
+  //
+  // The old bug (snap-back): editMessage()'s textarea.focus() auto-scrolls the
+  // page to bring the input into view — an INSTANT jump — which raced the demo
+  // card's own smooth scrollIntoView and teleported the page instead of gliding.
+  // Fix: (1) fill the text FIRST so layout is settled, (2) focus with
+  // preventScroll so the browser does no auto-scroll, (3) run exactly one smooth
+  // scroll that lands the composer centered in the viewport (not slammed to the
+  // top), (4) a subtle arrival cue instead of the lost focus jump. Reduced-motion
+  // users get an instant jump and no cue.
+  const prefillFromDemo = useCallback((text: string) => {
+    // 1. fill first — the value and auto-grown height settle before we scroll,
+    //    so the scroll target can't shift mid-animation
+    setInput(text)
+    const el = inputRef.current
+    if (el) {
+      // 2. focus WITHOUT the browser's auto-scroll; this scroll is ours alone
+      el.focus({ preventScroll: true })
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+    }
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // 3. one owned scroll on the next frame (after the fill has laid out),
+    //    centering the composer so it rests comfortably in view
+    requestAnimationFrame(() => {
+      composerRef.current?.scrollIntoView({
+        behavior: reduce ? 'auto' : 'smooth',
+        block: 'center',
+      })
+    })
+    // 4. gentle "text arrived" cue (soft tint/border fade), motion-safe only
+    if (!reduce) {
+      setPrefillCue(false)
+      // re-arm on the next frame so re-clicking a card replays the fade
+      requestAnimationFrame(() => setPrefillCue(true))
+      if (prefillCueTimerRef.current) clearTimeout(prefillCueTimerRef.current)
+      prefillCueTimerRef.current = setTimeout(() => setPrefillCue(false), 900)
+    }
+  }, [])
+
   useEffect(() => {
     const onPrefill = (e: Event) => {
       const q = (e as CustomEvent<string>).detail
-      if (typeof q === 'string' && q.trim()) editMessage(q)
+      if (typeof q === 'string' && q.trim()) prefillFromDemo(q)
     }
     window.addEventListener('crux:prefill', onPrefill)
     return () => window.removeEventListener('crux:prefill', onPrefill)
-  }, [editMessage])
+  }, [prefillFromDemo])
+
+  // tidy the cue timer on unmount
+  useEffect(
+    () => () => {
+      if (prefillCueTimerRef.current) clearTimeout(prefillCueTimerRef.current)
+    },
+    [],
+  )
 
   const counterColor =
     remaining <= 0
@@ -1036,9 +1296,12 @@ export function Tool() {
                   style) — roomier padding and a taller input via the classes
                   below. Docked mode keeps the compact recipe. Same element,
                   same radius, so the dock transition never reshapes it. */}
-              <div className={`tool-composer relative rounded-2xl border border-border bg-card transition focus-within:border-accent ${
-                composerCentered ? 'px-4 pb-3 pt-4' : 'px-3 pb-2.5 pt-3'
-              }`}>
+              <div
+                ref={composerRef}
+                className={`tool-composer relative rounded-2xl border border-border bg-card transition focus-within:border-accent ${
+                  prefillCue ? 'crux-prefill-cue' : ''
+                } ${composerCentered ? 'px-4 pb-3 pt-4' : 'px-3 pb-2.5 pt-3'}`}
+              >
               {/* file chips — compact, Claude-style */}
               {hasDocs && (
                 <div className="mb-2.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
@@ -1125,11 +1388,15 @@ export function Tool() {
                 className="flex flex-col gap-2"
               >
                 {/* hidden pickers: one for files & photos, one for audio */}
+                {/* accept lists carry BOTH extensions and MIME types: mobile
+                    browsers (iOS especially) grey out files when only an
+                    extension is given, so the MIME types make Word/audio/etc.
+                    reliably selectable. addFiles logic is unchanged. */}
                 <input
                   ref={addInputRef}
                   type="file"
                   multiple
-                  accept=".pdf,.docx,.txt,.xlsx,.csv,.png,.jpg,.jpeg,.webp"
+                  accept=".pdf,.docx,.doc,.txt,.xlsx,.csv,.png,.jpg,.jpeg,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,image/png,image/jpeg,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     addFiles(Array.from(e.target.files ?? []))
@@ -1140,7 +1407,7 @@ export function Tool() {
                   ref={audioInputRef}
                   type="file"
                   multiple
-                  accept=".mp3,.wav"
+                  accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav"
                   className="hidden"
                   onChange={(e) => {
                     addFiles(Array.from(e.target.files ?? []))
@@ -1200,6 +1467,42 @@ export function Tool() {
                     composerCentered ? 'min-h-[76px]' : ''
                   }`}
                 />
+
+                {/* voice status line — sits directly above the mic so any
+                    problem is impossible to miss (the old code failed silently).
+                    Error wins over the note; both are one compact line. */}
+                {voiceError ? (
+                  <p
+                    role="alert"
+                    className="flex items-center gap-1.5 px-1 font-mono text-[11px] text-warn"
+                  >
+                    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+                    </svg>
+                    {voiceError}
+                    <button
+                      type="button"
+                      onClick={() => setVoiceError(null)}
+                      aria-label="Dismiss"
+                      className="ml-auto shrink-0 text-warn/70 transition hover:text-warn"
+                    >
+                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </p>
+                ) : (
+                  showVoiceNote && (
+                    <p className="flex items-center gap-1.5 px-1 font-mono text-[11px] text-muted-foreground">
+                      <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                        <rect x="5" y="11" width="14" height="9" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Voice is transcribed in your browser.
+                    </p>
+                  )
+                )}
 
                 {/* controls row: [+] on the left, mic · send on the right */}
                 <div className="flex items-center justify-between gap-2">

@@ -641,8 +641,67 @@ Conclusion: the Perplexity/Claude layout patterns are the real design source; Fi
 
 Demo cards in `components/crux/demos.tsx` and the composer in `components/crux/tool.tsx` are sibling components with no shared parent state, so the "Try a demo like this →" link talks to the composer through a plain browser event instead of a context/provider:
 
-- **Sender** (demos.tsx `loadDemo(q)`): `window.dispatchEvent(new CustomEvent('crux:prefill', { detail: q }))` then smooth-scrolls to `#tool`. `q` is always the card's own displayed question (`d.q`), so the prefill text can never drift from the card copy.
-- **Listener** (tool.tsx, one `useEffect` near `editMessage`): reads `(e as CustomEvent<string>).detail`, ignores non-string/blank, and calls the existing `editMessage()` (same fill + focus + textarea auto-grow path the suggestion chips use).
+- **Sender** (demos.tsx `loadDemo(q)`): `window.dispatchEvent(new CustomEvent('crux:prefill', { detail: q }))` then smooth-scrolls to `#tool`. `q` is always the card's own displayed question (`d.q`), so the prefill text can never drift from the card copy. **SUPERSEDED (sixth pass, same day): the sender no longer scrolls — that second scroll caused the snap-back; the tool now owns the one smooth scroll. See the sixth-pass note below.**
+- **Listener** (tool.tsx, one `useEffect` near `editMessage`): reads `(e as CustomEvent<string>).detail`, ignores non-string/blank, and calls the existing `editMessage()` (same fill + focus + textarea auto-grow path the suggestion chips use). **SUPERSEDED: the listener now calls a dedicated `prefillFromDemo()` (fill-first, `focus({preventScroll})`, one owned center-scroll, arrival cue) instead of `editMessage()`.**
 - **Contract**: event name `crux:prefill`, `detail` = the question string. Fire-and-forget; if no doc is uploaded the text still fills and a send falls into general chat.
 
 Also in this pass: the five demo filter tabs (All/Legal/Medical/Finance/HR) get `text-xs` + `px-2.5` + `gap-0.5` below `sm` so they hold one row at 390px (they previously wrapped "HR" to a second line); desktop sizes unchanged.
+
+## Working notes — smooth prefill + live voice + mobile accept (2026-07-23, sixth pass)
+
+- **Prefill snap-back root cause + fix (the macOS-motion pass).** The old
+  `crux:prefill` flow ran TWO competing scrolls: demos.tsx `loadDemo` did its own
+  `#tool` smooth `scrollIntoView`, AND the tool's listener called `editMessage()`,
+  whose `textarea.focus()` triggers the browser's *instant* auto-scroll to bring the
+  input into view. Sampled `window.scrollY` proved it: click → instant teleport
+  demos(2271)→~670 (the focus jump, no easing), then a small smooth 670→555 — a
+  jarring non-monotonic motion the user read as "snap back to the cards." Fix, all in
+  tool.tsx `prefillFromDemo` (the ONE owner of the motion; demos.tsx no longer
+  scrolls at all): (1) `setInput(text)` FIRST so the value + auto-grown height settle
+  before measuring; (2) `inputRef.focus({ preventScroll: true })` so the browser does
+  NO auto-scroll; (3) exactly one owned scroll on the next `requestAnimationFrame` —
+  `composerRef.scrollIntoView({ behavior: 'smooth', block: 'center' })` — landing the
+  composer at viewport center (verified: composer center 360 == viewport center 360),
+  not slammed to the top; (4) a subtle "text arrived" cue (`crux-prefill-cue` class →
+  `@keyframes composer-prefill`, a 0.9s accent border + faint inner accent wash that
+  fades out) replacing the lost focus jump as the arrival signal. Reduced-motion:
+  `behavior: 'auto'` (instant) and the cue is never added (JS-gated) plus the global
+  reduced-motion kill neuters the keyframe anyway. Re-sampled after the fix: scrollY
+  falls monotonically 2271→…→690 and STAYS, `reversalDetected: false`. `composerRef`
+  attaches to the single `.tool-composer` instance so it targets whichever slot
+  (centered/docked) is live. `editMessage()` is untouched — suggestion chips still use
+  it (they're already in view, so their focus-scroll is negligible); only the demo
+  path gets the dedicated handler.
+- **Live voice = Web Speech API, batch `/transcribe` kept as fallback.** Primary path
+  (tool.tsx `startListening`): `getSpeechRecognitionCtor()` grabs
+  `window.SpeechRecognition || webkitSpeechRecognition` (module-scope helper; the Web
+  Speech API has NO standard TS lib types, so a slim `SpeechRec`/`SpeechResultEvent`
+  shape is declared by hand). `continuous=true`, `interimResults=true`, `lang='en-US'`.
+  `onresult` rebuilds final+interim from the full results list each event and
+  live-sets the composer to `voiceBaseRef (pre-existing text) + final + interim`, so
+  speech APPENDS and never wipes a draft; `voiceFinalRef` holds the settled transcript
+  and `finishListening()` commits `base+final` (dropping any dangling interim) on every
+  stop path (user click, `onend`, `onerror`). **Fallback contract:** when there's no
+  SpeechRecognition ctor, `startListening` calls the original `startRecording()`
+  (record → `webmToWav` → `POST /transcribe`) — that code is intact, only its silent
+  `console.warn` failures now also `setVoiceError(...)`. **Visible errors (the whole
+  point — old code failed silently at the mic):** a `role="alert"` line directly above
+  the mic for: insecure context (`window.isSecureContext === false`), permission denied
+  (`onerror` `not-allowed`/`service-not-allowed`), no mic (`audio-capture`), ctor throw,
+  and batch getUserMedia/transcribe failure. `no-speech`/`aborted` are benign (no
+  message). **Privacy note:** one-time `showVoiceNote` ("Voice is transcribed in your
+  browser.") on the first successful live start (`voiceNoteSeenRef`), since Web Speech
+  routes audio through the browser vendor. **Reduced-motion:** interim text streams
+  straight into the textarea — there is NO separate blinking-caret element to suppress;
+  the mic's `animate-pulse` is already killed by the global reduced-motion block. One
+  composer instance, so it works in both centered and docked slots. Verified with
+  stubbed recognizers in Playwright: ctor-throw / permission-denied / unsupported-→-
+  batch all show their distinct visible errors, and a well-behaved stub streams interim
+  text in live with the note + "Listening…" placeholder + running timer.
+- **Mobile file accept hardened.** iOS/Android pickers grey out files when `accept`
+  carries extensions only, so both `<input type=file>` accept lists now carry
+  extensions AND MIME types. Doc/image input added `.doc` plus `application/pdf`,
+  the docx/msword/xlsx MIME types, `text/plain`, `text/csv`, and the image MIMEs.
+  Audio input added `audio/mpeg, audio/wav, audio/x-wav`. `addFiles` logic is
+  untouched — this is only the picker-affordance half; backend extension-robustness is
+  a parallel agent's job.

@@ -43,13 +43,16 @@ const TABS = ['All', 'Legal', 'Medical', 'Finance', 'HR']
 
 // Doesn't touch component state, so it lives outside the component — keeps
 // the function identity stable across renders instead of rebuilding it every time.
-// Besides scrolling to the tool, it broadcasts the card's own question via a
-// plain browser event ("crux:prefill") — the tool listens for it and drops the
-// text into the composer. A DOM event because Demos and Tool are sibling
-// components with no shared parent state; this avoids a context refactor.
+// It broadcasts the card's own question via a plain browser event
+// ("crux:prefill") — the tool listens for it and drops the text into the
+// composer. A DOM event because Demos and Tool are sibling components with no
+// shared parent state; this avoids a context refactor.
+//
+// IMPORTANT: no scroll here. The tool's prefill handler owns the ONE smooth
+// scroll that lands the composer in view. Scrolling here too used to race that
+// motion (this instant/smooth pair snapped the page back) — see tool.tsx.
 function loadDemo(q: string) {
   window.dispatchEvent(new CustomEvent('crux:prefill', { detail: q }))
-  document.getElementById('tool')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 export function Demos() {

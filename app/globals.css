@@ -548,6 +548,27 @@
   );
 }
 
+/* "text just arrived" cue after a demo-card prefill. We suppress the browser's
+   focus auto-scroll (it caused the snap-back), so this soft one-shot — an accent
+   border + a faint inner accent wash that fades out — is the gentle signal that
+   the question dropped into the composer. One-shot, no loop; the global
+   prefers-reduced-motion kill collapses it to nothing (and the JS never adds the
+   class for reduced-motion users anyway). */
+.tool-dark .tool-composer.crux-prefill-cue {
+  animation: composer-prefill 0.9s ease-out;
+}
+@keyframes composer-prefill {
+  0% {
+    border-color: var(--accent-bright);
+    box-shadow: inset 0 0 0 9999px
+      color-mix(in srgb, var(--accent-bright) 9%, transparent);
+  }
+  100% {
+    border-color: var(--tool-border-strong);
+    box-shadow: inset 0 0 0 9999px transparent;
+  }
+}
+
 /* user message — a glass pill, not a solid fill. This is where the glass
    material earns its keep on the chat: a near-invisible warm-white fill (0.05–
    0.09, well under the milky-fog range) with the blur + saturate doing the
