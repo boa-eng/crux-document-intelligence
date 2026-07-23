@@ -691,6 +691,64 @@
 }
 
 /* ============================================
+   DOT MATRIX (the stats-row "15/15")
+   ============================================ */
+/* LED display for the first stat. Lit dots use the warm ember from the CTA
+   backdrop glow (#B2762E), bright-mixed 60/40 with white like every other
+   on-ink accent — solid ember on ink sits too dark and the number must pop.
+   Sized so the 5-row matrix matches the text-4xl/5xl serif stat numbers
+   beside it: 5 dots + 4 gaps ≈ the digits' cap height at each breakpoint. */
+.dotmatrix {
+  --dm-dot: 5px;
+  --dm-gap: 3px;
+  --dm-ember: color-mix(in srgb, #b2762e 60%, white);
+  display: grid;
+  gap: var(--dm-gap);
+}
+@media (min-width: 768px) {
+  .dotmatrix {
+    --dm-dot: 6px;
+    --dm-gap: 4px;
+  }
+}
+.dm-dot {
+  width: var(--dm-dot);
+  height: var(--dm-dot);
+  border-radius: 9999px;
+  /* unlit dots at ~5% warm white: visible matrix texture, so the numerals
+     read as pixels on a device rather than shapes floating in space */
+  background: rgba(255, 250, 245, 0.05);
+}
+.dm-lit {
+  background: var(--dm-ember);
+  /* glow is a whisper per the restraint rule: one tight low-alpha halo per
+     dot, no outer bloom — the field of dots adds up to enough warmth */
+  box-shadow: 0 0 6px color-mix(in srgb, var(--dm-ember) 45%, transparent);
+}
+/* Ambient flicker: a few padding-field dots breathe toward a faint ember
+   (peak ~18% — barely-there by design). Paused until the matrix scrolls into
+   view (.is-visible via useReveal) so off-screen sections cost nothing.
+   Reduced-motion users are covered by the global animation kill below: the
+   0.01ms one-shot ends on the 100% keyframe, which is the unlit resting
+   state, so they see a static lit number over a static field. */
+.dm-flicker {
+  animation: dm-flicker 3.4s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.dotmatrix.is-visible .dm-flicker {
+  animation-play-state: running;
+}
+@keyframes dm-flicker {
+  0%,
+  100% {
+    background: rgba(255, 250, 245, 0.05);
+  }
+  50% {
+    background: color-mix(in srgb, var(--dm-ember) 18%, transparent);
+  }
+}
+
+/* ============================================
    REDUCED MOTION
    ============================================ */
 @media (prefers-reduced-motion: reduce) {

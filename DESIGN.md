@@ -362,6 +362,35 @@ one of them is wrong.
   globals.css + a page reload — verify new classes via
   `getComputedStyle` before debugging selectors.
 
+## Working notes — dot-matrix "15/15" stat (2026-07-22, fifth pass)
+
+- **`components/crux/dot-matrix.tsx` (new, generic):** renders a string as an
+  LED dot grid (Supabase GitHub-counter pattern). CSS grid of rounded `<span>`
+  dots, not SVG — at ~135 dots a div grid is simpler and the glow is one
+  box-shadow per lit dot. 5-row pixel font defined ONLY for '1'/'5'/'/'; the
+  unlit field extends 3 columns past the glyphs each side so it reads as a
+  device, not clip-art. `role="img" aria-label="15/15"` carries the number for
+  screen readers.
+- **Color:** lit dots = `color-mix(in srgb, #B2762E 60%, white)` — the CTA
+  backdrop's warm ember run through the site's standard 60/40 bright-mix (the
+  burgundy accent-bright read too dark for a "display"). Unlit = 5% warm white.
+  Glow = one tight `0 0 6px` halo at 45% alpha per lit dot, nothing else.
+- **Flicker is deterministic and gated.** A fixed arithmetic rule
+  (`(row*31+col) % 7`) picks ~5 padding-field dots (never inside numerals);
+  delays/durations derive from the same seed — no Math.random, so SSR and
+  hydration agree. `animation-play-state: paused` until `useReveal` adds
+  `.is-visible`; the global reduced-motion kill ends the 0.01ms one-shot on
+  the 100% keyframe = unlit resting state, so reduced-motion users get a
+  static lit number.
+- **Sizing/alignment:** `--dm-dot`/`--dm-gap` = 5/3px (37px tall) stepping to
+  6/4px at md (46px), wrapped in `h-10 md:h-12 flex items-center` inside the
+  existing Stat value slot so it fills the exact line box of the text-4xl/5xl
+  serif numbers and all three labels keep one baseline. `Stat`'s `value` prop
+  widened to `React.ReactNode`; other two stats and all copy untouched.
+- **Stale-CSS trap hit AGAIN:** the `.dotmatrix` rules served as
+  `display: block` until a second content edit to globals.css + reload.
+  Verify via `getComputedStyle` first, always.
+
 ---
 
 # Part 2 — Liquid-glass material research (Apple HIG / WWDC25, CSS craft, Linear/Raycast/Vercel)
